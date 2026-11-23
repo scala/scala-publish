@@ -351,14 +351,22 @@ object Group {
 
     def addSnapshotVersioning(now: Instant, ignoreExtensions: Set[String]): Module = {
 
-      assert(version.endsWith("-SNAPSHOT") || version.endsWith(".SNAPSHOT"))
+      require(version.endsWith("SNAPSHOT"), s"Not a snapshot version: $version")
 
-      val versionPrefix = version.stripSuffix("SNAPSHOT").dropRight(1)
+      // "1.0-SNAPSHOT" and "1.0.SNAPSHOT" give "1.0-<timestamp>-<build number>",
+      // "1.0SNAPSHOT" gives "1.0<timestamp>-<build number>", like Maven does
+      val versionPrefix =
+        if version.endsWith("-SNAPSHOT") || version.endsWith(".SNAPSHOT") then
+          version.stripSuffix("SNAPSHOT").dropRight(1) + "-"
+        else version.stripSuffix("SNAPSHOT")
+
+      def timestampedVersion(timestamp: java.time.LocalDateTime, buildNumber: Int) =
+        s"$versionPrefix${timestamp.format(publish.MavenMetadata.timestampPattern)}-$buildNumber"
 
       val initialFilePrefix = s"${name.value}-${snapshotVersioning.getOrElse(version)}"
 
       def updatedVersion(buildNumber: Int) =
-        s"$versionPrefix-${now.atOffset(ZoneOffset.UTC).toLocalDateTime.format(publish.MavenMetadata.timestampPattern)}-$buildNumber"
+        timestampedVersion(now.atOffset(ZoneOffset.UTC).toLocalDateTime, buildNumber)
 
       def artifacts(buildNumber: Int) = {
         val updatedVersion0 = updatedVersion(buildNumber)
@@ -430,7 +438,7 @@ object Group {
               ???
             }
           val latestSnapshotVer =
-            s"$versionPrefix-${latestSnapshotParams._2.atOffset(ZoneOffset.UTC).toLocalDateTime.format(publish.MavenMetadata.timestampPattern)}-${latestSnapshotParams._1}"
+            timestampedVersion(latestSnapshotParams._2, latestSnapshotParams._1)
           if snapshotVersioning.contains(latestSnapshotVer) then
             latestSnapshotParams._1 ->
               elem // kind of meh, this is in case the source already has snapshot ver, and the dest hasn't, so the current maven metadata only comes from the source
