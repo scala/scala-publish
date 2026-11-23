@@ -330,4 +330,12 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
     val updated = MavenMetadata.updateSnapshotVersioning(elem, None, None, None, None, None, Nil)
     assertEquals(updated.child.collect { case e: Elem => e.label }, Seq("groupId"))
   }
+
+  test("updateMavenMetadata fails, rather than overwriting, when the repository refuses access") {
+    val backend = sttp.client3.testing.SttpBackendStub.synchronous.whenAnyRequest
+      .thenRespondWithCode(sttp.model.StatusCode.Unauthorized)
+    intercept[download.Download.Error.Unauthorized] {
+      update(moduleFiles("1.1.0"), download.HttpDownload(backend))
+    }
+  }
 }
