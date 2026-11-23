@@ -32,11 +32,11 @@ final case class FileUpload(base: Path) extends Upload {
         }
         catch {
           case NonFatal(e) =>
-            Some(e)
+            Some(new Upload.Error.FileException(e))
         }
-      logger.uploaded(p.toString, loggingId, errorOpt.map(e => new Upload.Error.FileException(e)))
+      logger.uploaded(p.toString, loggingId, errorOpt)
 
-      None
+      errorOpt
     }
     else
       throw new Exception(s"Invalid path: $url (base: $base0, p: $p)")
