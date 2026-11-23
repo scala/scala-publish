@@ -53,6 +53,10 @@ jobs:
 
   publish:
     if: github.event_name == 'push'
+    needs:
+      - test
+      - format
+      - scalafix
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
