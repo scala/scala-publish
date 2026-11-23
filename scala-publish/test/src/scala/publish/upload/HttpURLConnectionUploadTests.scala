@@ -3,7 +3,7 @@ package scala.publish.upload
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import coursier.core.Authentication
 
-import java.net.InetSocketAddress
+import java.net.{ConnectException, InetSocketAddress, ServerSocket}
 import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable
@@ -18,7 +18,8 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
     method: String,
     path: String,
     body: Seq[Byte],
-    authorization: Option[String]
+    authorization: Option[String],
+    contentType: Option[String] = None
   )
 
   /** Starts a local HTTP server answering every request with `respond`, and records requests. */
@@ -37,7 +38,8 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
               exchange.getRequestMethod,
               exchange.getRequestURI.getPath,
               body,
-              Option(exchange.getRequestHeaders.getFirst("Authorization"))
+              Option(exchange.getRequestHeaders.getFirst("Authorization")),
+              Option(exchange.getRequestHeaders.getFirst("Content-Type"))
             )
           }
           respond(exchange)
@@ -83,7 +85,8 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
           "PUT",
           "/org/example/lib_3/1.0.0/lib_3-1.0.0.jar",
           Seq[Byte](1, 2, 3),
-          auth.allHttpHeaders.toMap.get("Authorization")
+          auth.allHttpHeaders.toMap.get("Authorization"),
+          Some("application/octet-stream")
         ))
       )
     }
@@ -202,6 +205,39 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
       }
       val elapsedMs = (System.nanoTime() - start) / 1000000L
       assert(elapsedMs < 1200L, clue = s"took $elapsedMs ms")
+    }
+  }
+
+  test("the URL suffix is appended to the upload URL") {
+    withServer(reply(_, 201)) { (base, received) =>
+      val res = HttpURLConnectionUpload.create(".suffix")
+        .upload(s"$base/lib.jar", None, Array[Byte](1), nop)
+      assertEquals(res, None)
+      assertEquals(received().map(_.path), Seq("/lib.jar.suffix"))
+    }
+  }
+
+  test("connection failures are thrown, and reported to the logger as UploadError") {
+    val port = {
+      val socket = new ServerSocket(0)
+      try socket.getLocalPort
+      finally socket.close()
+    }
+    val logged = mutable.ArrayBuffer.empty[Option[Upload.Error]]
+    val logger = new UploadLogger {
+      override def uploaded(
+        url: String,
+        idOpt: Option[Object],
+        errorOpt: Option[Upload.Error]
+      ): Unit = logged += errorOpt
+    }
+    val url = s"http://127.0.0.1:$port/lib.jar"
+    intercept[ConnectException](upload.upload(url, None, Array[Byte](1), logger))
+    logged.toList match {
+      case List(Some(e: Upload.Error.UploadError)) =>
+        assertEquals(e.getMessage, s"Error uploading $url")
+        assert(e.getCause.isInstanceOf[ConnectException], clue = e.getCause)
+      case other => fail(s"Expected a logged UploadError, got $other")
     }
   }
 }

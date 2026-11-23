@@ -1,6 +1,6 @@
 package scala.publish
 
-import coursier.core.{Configuration, MinimizedExclusions, ModuleName, Organization}
+import coursier.core.{Configuration, MinimizedExclusions, ModuleName, Organization, Type}
 
 import scala.xml.{Elem, XML}
 
@@ -139,6 +139,148 @@ class PomTests extends ScalaPublishTestSuite {
     assertEquals(
       devs.map(d => ((d \ "id").text, (d \ "email").map(_.text).headOption)),
       Seq("a" -> Some("a@example.com"), "b" -> None, "c" -> Some("c@example.com"))
+    )
+  }
+
+  /** A POM with every argument Scala CLI passes to `Pom.create` (see `Publish.scala` there) */
+  private lazy val fullPom: String = Pom.create(
+    organization = Organization("org.example"),
+    moduleName = ModuleName("lib_3"),
+    version = "1.0.0",
+    packaging = Some(Type.jar),
+    description = Some("A library & <more>"),
+    url = Some("https://github.com/example/lib"),
+    name = Some("lib"),
+    dependencies = Seq(
+      (
+        Organization("org.scala-lang"),
+        ModuleName("scala3-library_3"),
+        "3.3.6",
+        None,
+        MinimizedExclusions.zero
+      ),
+      (
+        Organization("org.dep"),
+        ModuleName("dep_3"),
+        "2.0.0",
+        Some(Configuration.test),
+        MinimizedExclusions(Set((Organization("org.x"), ModuleName("y"))))
+      )
+    ),
+    license = Some(Pom.License.apache2),
+    scm = Some(Pom.Scm.gitHub("example", "lib")),
+    developers = Seq(
+      Pom.Developer("jdoe", "Jane Doe", "https://github.com/jdoe", Some("jane@example.com"))
+    )
+  )
+
+  test("full POM (golden)") {
+    val expected =
+      """<?xml version="1.0" encoding="UTF-8"?>
+        |<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        |  <modelVersion>4.0.0</modelVersion>
+        |  <groupId>org.example</groupId>
+        |  <artifactId>lib_3</artifactId>
+        |  <version>1.0.0</version>
+        |  <packaging>jar</packaging>
+        |  <url>https://github.com/example/lib</url>
+        |  <description>A library &amp; &lt;more&gt;</description>
+        |  <name>lib</name>
+        |  <organization>
+        |    <name>org.example</name>
+        |    <url>https://github.com/example/lib</url>
+        |  </organization>
+        |  <licenses>
+        |    <license>
+        |      <name>Apache-2.0</name>
+        |      <url>https://spdx.org/licenses/Apache-2.0.html</url>
+        |      <distribution>repo</distribution>
+        |    </license>
+        |  </licenses>
+        |  <scm>
+        |    <url>https://github.com/example/lib.git</url>
+        |    <connection>scm:git:github.com/example/lib.git</connection>
+        |    <developerConnection>scm:git:git@github.com:example/lib.git</developerConnection>
+        |  </scm>
+        |  <developers>
+        |    <developer>
+        |      <id>jdoe</id>
+        |      <name>Jane Doe</name>
+        |      <email>jane@example.com</email>
+        |      <url>https://github.com/jdoe</url>
+        |    </developer>
+        |  </developers>
+        |  <dependencies>
+        |    <dependency>
+        |      <groupId>org.scala-lang</groupId>
+        |      <artifactId>scala3-library_3</artifactId>
+        |      <version>3.3.6</version>
+        |    </dependency>
+        |    <dependency>
+        |      <groupId>org.dep</groupId>
+        |      <artifactId>dep_3</artifactId>
+        |      <version>2.0.0</version>
+        |      <scope>test</scope>
+        |      <exclusions>
+        |        <exclusion>
+        |          <groupId>org.x</groupId>
+        |          <artifactId>y</artifactId>
+        |        </exclusion>
+        |      </exclusions>
+        |    </dependency>
+        |  </dependencies>
+        |</project>""".stripMargin
+    assertNoDiff(fullPom, expected)
+  }
+
+  test("full POM round-trips through coursier's POM parser") {
+    val project = parse(fullPom)
+    assertEquals(project.module.organization.value, "org.example")
+    assertEquals(project.module.name.value, "lib_3")
+    assertEquals(project.version0.asString, "1.0.0")
+    assertEquals(project.packagingOpt, Some(Type.jar))
+    assertEquals(project.info.description, "A library & <more>")
+    assertEquals(project.info.homePage, "https://github.com/example/lib")
+    assertEquals(
+      project.info.licenseInfo.map(l => (l.name, l.url)),
+      Seq(("Apache-2.0", Some("https://spdx.org/licenses/Apache-2.0.html")))
+    )
+    assertEquals(
+      project.info.scm.map(s => (s.url, s.connection, s.developerConnection)),
+      Some((
+        Some("https://github.com/example/lib.git"),
+        Some("scm:git:github.com/example/lib.git"),
+        Some("scm:git:git@github.com:example/lib.git")
+      ))
+    )
+    // coursier's SAX POM parser doesn't read developers (`developers = Nil // TODO` there),
+    // they're checked at the XML level above
+    assertEquals(
+      project.dependencies0.map { case (v, d) => (d.module.toString, v.asConfiguration) },
+      Seq(
+        ("org.scala-lang:scala3-library_3", Some(Configuration.empty)),
+        ("org.dep:dep_3", Some(Configuration.test))
+      )
+    )
+  }
+
+  test("minimal POM only has the mandatory elements and an organization") {
+    val pom  = Pom.create(Organization("org.example"), ModuleName("lib_3"), "1.0.0")
+    val root = XML.loadString(pom)
+    assertEquals(
+      root.child.collect { case e: Elem => e.label },
+      Seq("modelVersion", "groupId", "artifactId", "version", "organization")
+    )
+  }
+
+  // Scala CLI uses Pom.print to serialize its ivy.xml files
+  test("Pom.print adds an XML declaration and indents with 2 spaces") {
+    assertEquals(
+      Pom.print(<a><b>c</b></a>),
+      """<?xml version="1.0" encoding="UTF-8"?>
+        |<a>
+        |  <b>c</b>
+        |</a>""".stripMargin
     )
   }
 }
