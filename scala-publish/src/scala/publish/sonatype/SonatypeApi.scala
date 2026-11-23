@@ -230,7 +230,7 @@ final case class SonatypeApi(
                   val errors = checkActivityOpt match {
                     case Some(checkActivity) =>
                       val lastActivity0 = lastActivity(repositoryId, checkActivity)
-                      lastActivity0.toSeq.map(activityErrored).flatMap(_.left.toOption)
+                      lastActivity0.toSeq.map(activityErrored).flatMap(_.left.toOption).flatten
                     case None =>
                       Nil
                   }
