@@ -41,9 +41,8 @@ trait Signer {
         if path.elements.lastOption.exists(n => n.endsWith(".asc")) then
           // found a signature
           Seq(Right(path.mapLast(_.stripSuffix(".asc"))))
-        else if path.elements.lastOption.exists(n => n.contains(".asc.")) then
-          // FIXME May not be ok if e.g. version contains .asc., like 2.0.asc.1 (this is unlikely though)
-          // ignored file
+        else if path.elements.lastOption.exists(Signer.isSignatureChecksum) then
+          // checksum of a signature, ignored
           Nil
         else
           // may need to be signed
@@ -114,4 +113,12 @@ trait Signer {
       }
     }
   }
+}
+
+object Signer {
+  private val signatureChecksumExtensions = Seq("md5", "sha1", "sha256", "sha512")
+
+  /** Whether `fileName` is a checksum of a signature, like `foo.jar.asc.sha1` */
+  private[signing] def isSignatureChecksum(fileName: String): Boolean =
+    signatureChecksumExtensions.exists(ext => fileName.endsWith(s".asc.$ext"))
 }
