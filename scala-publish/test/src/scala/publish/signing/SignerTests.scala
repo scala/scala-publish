@@ -68,4 +68,79 @@ class SignerTests extends ScalaPublishTestSuite {
     val sig = res.fold(err => fail(s"Unexpected error: $err"), _.elements.map(_._2))
     assertEquals(sig.map(c => new String(c.content(), StandardCharsets.UTF_8)), Seq("signed:a.jar"))
   }
+
+  /** Like Scala CLI's `BouncycastleExternalSigner`, which matches on both kinds of content */
+  private object FailingSigner extends Signer {
+    val signed = scala.collection.mutable.ArrayBuffer.empty[String]
+    def sign(content: Content): Either[String, String] = {
+      val name = content match {
+        case Content.File(path)         => path.getFileName.toString
+        case Content.InMemory(_, bytes) => new String(bytes, StandardCharsets.UTF_8)
+      }
+      signed += name
+      if name.endsWith(".pom") then Left(s"cannot sign $name") else Right("sig")
+    }
+  }
+
+  test("signing stops at the first failure, reporting its path, content and message") {
+    val res = FailingSigner.signatures(
+      fileSet("a.jar", "b.pom", "c.jar"),
+      now,
+      Set.empty,
+      Set.empty,
+      SignerLogger.nop
+    )
+    res match {
+      case Left((path, content, msg)) =>
+        assertEquals(path, Path(dir :+ "b.pom"))
+        assertEquals(new String(content.content(), StandardCharsets.UTF_8), "b.pom")
+        assertEquals(msg, "cannot sign b.pom")
+      case Right(fs) => fail(s"Expected a failure, got $fs")
+    }
+    assertEquals(FailingSigner.signed.toList, List("a.jar", "b.pom"))
+  }
+
+  test("the logger is started and stopped around signing, even when the signer throws") {
+    val events = scala.collection.mutable.ArrayBuffer.empty[String]
+    val logger = new SignerLogger {
+      override def start(): Unit                          = events += "start"
+      override def stop(keep: Boolean): Unit              = events += "stop"
+      override def signing(id: Object, fs: FileSet): Unit = events +=
+        s"signing(${fs.elements.length})"
+      override def signed(id: Object, fs: FileSet): Unit = events +=
+        s"signed(${fs.elements.length})"
+      override def signingElement(id: Object, path: Path): Unit =
+        events += s"signingElement(${path.elements.last})"
+      override def signedElement(id: Object, path: Path, excOpt: Option[Throwable]): Unit =
+        events += s"signedElement(${path.elements.last}, ${excOpt.map(_.getMessage)})"
+    }
+    val throwing = new Signer {
+      def sign(content: Content): Either[String, String] = throw new RuntimeException("boom")
+    }
+    intercept[RuntimeException](throwing.signatures(
+      fileSet("a.jar"),
+      now,
+      Set.empty,
+      Set.empty,
+      logger
+    ))
+    assertEquals(
+      events.toList,
+      List(
+        "start",
+        "signing(1)",
+        "signingElement(a.jar)",
+        "signedElement(a.jar, Some(boom))",
+        "signed(1)",
+        "stop"
+      )
+    )
+  }
+
+  test("NopSigner adds no signatures") {
+    assertEquals(
+      NopSigner.signatures(fileSet("a.jar"), now, Set.empty, Set.empty, SignerLogger.nop),
+      Right(FileSet.empty)
+    )
+  }
 }
