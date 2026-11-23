@@ -296,6 +296,25 @@ class SonatypeStagingFlowTests extends ScalaPublishTestSuite {
       clue = e.getMessage
     )
   }
+
+  // with autoDropAfterRelease = true (sent by promoteStagingRepository), the staging repository
+  // can be dropped as soon as it's released
+  test("release: a staging repository dropped right after release counts as released") {
+    val server = new FakeStagingServer(dropRepoAt = Some("released"))
+    val hooks  = hooksFor(server)
+    val data   = run(hooks.beforeUpload(fileSet("org.example"), isSnapshot = false))
+    run(hooks.afterUpload(data))
+    assert(server.calls.exists(_.path.endsWith("/bulk/promote")))
+  }
+
+  test("release: a staging repository disappearing before being closed is still an error") {
+    val server = new FakeStagingServer(dropRepoAt = Some("closed"))
+    val hooks  = hooksFor(server)
+    val data   = run(hooks.beforeUpload(fileSet("org.example"), isSnapshot = false))
+    val e      = intercept[Exception](run(hooks.afterUpload(data)))
+    assertEquals(e.getMessage, s"Repository ${server.stagedRepoId} not found")
+    assert(!server.calls.exists(_.path.endsWith("/bulk/promote")))
+  }
 }
 
 object SonatypeStagingFlowTests {
@@ -340,7 +359,9 @@ object SonatypeStagingFlowTests {
   final class FakeStagingServer(
     profilesStatus: StatusCode = StatusCode.Ok,
     finishStatus: StatusCode = StatusCode.Created,
-    closeFailures: Seq[String] = Nil
+    closeFailures: Seq[String] = Nil,
+    // the staging repository disappears once it reaches this status (e.g. dropped after release)
+    dropRepoAt: Option[String] = None
   ) {
     val repoBase     = "https://staging.example.test"
     val apiBase      = s"$repoBase/service/local"
@@ -404,9 +425,11 @@ object SonatypeStagingFlowTests {
 
         case (Method.GET, p)
             if p == s"/service/local/staging/profile_repositories/${profileExample.id}" =>
-          json(
-            s"""{"data":[{"profileId":"${profileExample.id}","profileName":"${profileExample.name}","repositoryId":"$stagedRepoId","type":"$repoStatus"}]}"""
-          )
+          if dropRepoAt.contains(repoStatus) then json("""{"data":[]}""")
+          else
+            json(
+              s"""{"data":[{"profileId":"${profileExample.id}","profileName":"${profileExample.name}","repositoryId":"$stagedRepoId","type":"$repoStatus"}]}"""
+            )
 
         case (Method.GET, p) if p == s"/service/local/staging/repository/$stagedRepoId/activity" =>
           val events = closeFailures.map { msg =>

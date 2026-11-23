@@ -91,7 +91,9 @@ object Hooks {
               maxAttempt = 20,
               initialDelay = 3.seconds,
               backoffFactor = 1.5,
-              es = es
+              es = es,
+              // promoted with autoDropAfterRelease, so the repository can be gone once released
+              missingRepositoryMeansDone = true
             )
           } yield ()
       }

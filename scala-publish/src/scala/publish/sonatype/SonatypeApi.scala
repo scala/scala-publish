@@ -212,11 +212,43 @@ final case class SonatypeApi(
     initialDelay: Duration,
     backoffFactor: Double,
     es: ScheduledExecutorService
+  ): Task[Unit] =
+    waitForStatus(
+      profileId,
+      repositoryId,
+      status,
+      checkActivityOpt,
+      maxAttempt,
+      initialDelay,
+      backoffFactor,
+      es,
+      missingRepositoryMeansDone = false
+    )
+
+  /** Waits for a staging repository to reach `status`
+    *
+    * @param missingRepositoryMeansDone
+    *   whether a repository that can't be found anymore should be considered as having reached
+    *   `status`, like when waiting for a release with `autoDropAfterRelease` (repositories are
+    *   dropped once released then)
+    */
+  def waitForStatus(
+    profileId: String,
+    repositoryId: String,
+    status: String,
+    checkActivityOpt: Option[String],
+    maxAttempt: Int,
+    initialDelay: Duration,
+    backoffFactor: Double,
+    es: ScheduledExecutorService,
+    missingRepositoryMeansDone: Boolean
   ): Task[Unit] = {
     // TODO Stop early in case of error (which statuses exactly???)
     def task(attempt: Int, nextDelay: Duration, totalDelay: Duration): Task[Unit] =
       Task.delay(listProfileRepositories(Some(profileId))).flatMap { l =>
         l.find(_.id == repositoryId) match {
+          case None if missingRepositoryMeansDone =>
+            Task.point(())
           case None =>
             Task.fail(new Exception(s"Repository $repositoryId not found"))
           case Some(repo) =>
