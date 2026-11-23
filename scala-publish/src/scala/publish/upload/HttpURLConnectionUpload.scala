@@ -56,7 +56,7 @@ final case class HttpURLConnectionUpload(
 
         val code = conn.getResponseCode
         if code == 401 then {
-          val realmOpt = Option(conn.getRequestProperty("WWW-Authenticate")).collect {
+          val realmOpt = Option(conn.getHeaderField("WWW-Authenticate")).collect {
             case BasicRealm(r) => r
           }
           Some(new Upload.Error.Unauthorized(url, realmOpt))
