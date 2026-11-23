@@ -140,13 +140,16 @@ object Pom {
                   {
                 if exclusions.nonEmpty then
                   <exclusions>{
-                    exclusions.data.toSet().foreach { case (org, module) =>
+                    exclusions.toSeq().sortBy { case (org, module) =>
+                      (org.value, module.value)
+                    }.map { case (org, module) =>
                       <exclusion>
                       <groupId>{org.value}</groupId>
                       <artifactId>{module.value}</artifactId>
                     </exclusion>
                     }
                   }</exclusions>
+                else NodeSeq.Empty
               }
                 </dependency>
           }
