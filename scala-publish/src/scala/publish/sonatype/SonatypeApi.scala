@@ -128,9 +128,10 @@ final case class SonatypeApi(
     }
 
   def createStagingRepository(profile: Profile, description: String): String = {
-    Console.err.println(
-      s"Creating staging repository for profile ${profile.name} (id: ${profile.id}) with description: $description"
-    )
+    if verbosity >= 0 then
+      Console.err.println(
+        s"Creating staging repository for profile ${profile.name} (id: ${profile.id}) with description: $description"
+      )
     get(
       s"$base/staging/profiles/${profile.id}/start",
       post = Some(postBody(writeToArray(StartRequest(description)))),
@@ -261,7 +262,8 @@ final case class SonatypeApi(
             Task.fail(new Exception(s"Repository $repositoryId not found"))
           case Some(repo) =>
             // TODO Use logger for that
-            System.err.println(s"Repository $repositoryId has status ${repo.`type`}")
+            if verbosity >= 0 then
+              Console.err.println(s"Repository $repositoryId has status ${repo.`type`}")
             repo.`type` match {
               case `status` =>
                 Task.point(())

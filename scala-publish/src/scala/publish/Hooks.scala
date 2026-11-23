@@ -35,7 +35,7 @@ object Hooks {
     es: ScheduledExecutorService,
     statusPollParams: EmaRetryParams = Sonatype.defaultStatusPollParams
   ) extends Hooks {
-    private def logger =
+    private lazy val logger =
       if batch then new BatchSonatypeLogger(out, verbosity)
       else InteractiveSonatypeLogger.create(out, verbosity)
 
