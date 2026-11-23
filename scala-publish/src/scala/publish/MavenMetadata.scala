@@ -68,6 +68,26 @@ object MavenMetadata {
       .replace("final", "")
       .forall(c => c.isDigit || c == '.' || c == '-')
 
+  /** Order of the children of `<versioning>` in maven-metadata.xml files */
+  private val versioningOrder =
+    Seq("latest", "release", "versions", "lastUpdated", "snapshot", "snapshotVersions")
+
+  /** Inserts `elem` among `children`, before the first child that comes after it in
+    * [[versioningOrder]]
+    */
+  private def insertInOrder(children: Seq[Node], elem: Elem): Seq[Node] = {
+    def rank(label: String): Int = {
+      val idx = versioningOrder.indexOf(label)
+      if idx < 0 then Int.MaxValue else idx
+    }
+    val idx = children.indexWhere {
+      case e: Elem => rank(e.label) > rank(elem.label)
+      case _       => false
+    }
+    if idx < 0 then children :+ elem
+    else children.patch(idx, Seq(elem), 0)
+  }
+
   def update(
     content: Elem,
     setOrg: Option[Organization],
@@ -76,44 +96,69 @@ object MavenMetadata {
     setRelease: Option[String],
     addVersions: Seq[String],
     setLastUpdated: Option[LocalDateTime]
-  ): Elem =
-    // FIXME Only updates previous tags for now, doesn't add those that need to be added
-    content.copy(
-      child = content.child.map {
+  ): Elem = {
+
+    def updateVersioning(versioning: Elem): Elem = {
+      val updatedChildren = versioning.child.map {
+        case n if n.label == "latest" =>
+          setLatest.fold(n)(v => <latest>{v}</latest>)
+        case n if n.label == "release" =>
+          setRelease.fold(n)(v => <release>{v}</release>)
+        case n: Elem if n.label == "versions" =>
+          val found = n
+            .child
+            .collect {
+              case n if n.label == "version" => n.text
+            }
+            .toSet
+          val toAdd = addVersions.filter(!found(_))
+          n.copy(
+            child = n.child ++ toAdd.map { v =>
+              <version>{v}</version>
+            }
+          )
+        case n if n.label == "lastUpdated" =>
+          setLastUpdated.fold(n)(t =>
+            <lastUpdated>{t.format(lastUpdatedPattern)}</lastUpdated>
+          )
+        case n => n
+      }
+
+      val missing: Seq[Elem] = {
+        def isMissing(label: String) = !versioning.child.exists(_.label == label)
+        setLatest.filter(_ => isMissing("latest")).map(v => <latest>{v}</latest>).toSeq ++
+          setRelease.filter(_ => isMissing("release")).map(v => <release>{v}</release>).toSeq ++
+          Some(addVersions)
+            .filter(v => v.nonEmpty && isMissing("versions"))
+            .map(v => <versions>{v.map(v0 => <version>{v0}</version>)}</versions>)
+            .toSeq ++
+          setLastUpdated
+            .filter(_ => isMissing("lastUpdated"))
+            .map(t => <lastUpdated>{t.format(lastUpdatedPattern)}</lastUpdated>)
+            .toSeq
+      }
+
+      versioning.copy(child = missing.foldLeft(updatedChildren)(insertInOrder))
+    }
+
+    val hasVersioningValues =
+      setLatest.nonEmpty || setRelease.nonEmpty || addVersions.nonEmpty || setLastUpdated.nonEmpty
+    val content0 =
+      if content.child.exists(_.label == "versioning") || !hasVersioningValues then content
+      else content.copy(child = content.child :+ <versioning/>)
+
+    content0.copy(
+      child = content0.child.map {
         case n if n.label == "groupId" =>
           setOrg.fold(n)(g => <groupId>{g.value}</groupId>)
         case n if n.label == "artifactId" =>
           setName.fold(n)(name => <artifactId>{name.value}</artifactId>)
         case n: Elem if n.label == "versioning" =>
-          n.copy(
-            child = n.child.map {
-              case n if n.label == "latest" =>
-                setLatest.fold(n)(v => <latest>{v}</latest>)
-              case n if n.label == "release" =>
-                setRelease.fold(n)(v => <release>{v}</release>)
-              case n: Elem if n.label == "versions" =>
-                val found = n
-                  .child
-                  .collect {
-                    case n if n.label == "version" => n.text
-                  }
-                  .toSet
-                val toAdd = addVersions.filter(!found(_))
-                n.copy(
-                  child = n.child ++ toAdd.map { v =>
-                    <version>{v}</version>
-                  }
-                )
-              case n if n.label == "lastUpdated" =>
-                setLastUpdated.fold(n)(t =>
-                  <lastUpdated>{t.format(lastUpdatedPattern)}</lastUpdated>
-                )
-              case n => n
-            }
-          )
+          updateVersioning(n)
         case n => n
       }
     )
+  }
 
   def createSnapshotVersioning(
     org: Organization,

@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutorService}
 import scala.publish.download.Download
 import scala.publish.download.logger.DownloadLogger
 import scala.publish.fileset.{FileSet, Path}
-import scala.xml.XML
+import scala.xml.{Elem, XML}
 
 class MavenMetadataTests extends ScalaPublishTestSuite {
 
@@ -200,5 +200,77 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
     assertEquals(MavenMetadata.highestVersion(Some("2.0.0"), Some("2.0.0-RC1")), Some("2.0.0"))
     assertEquals(MavenMetadata.highestVersion(Some(""), Some("1.0.0")), Some("1.0.0"))
     assertEquals(MavenMetadata.highestVersion(None, None), None)
+  }
+
+  private def versioningLabels(elem: Elem): Seq[String] =
+    (elem \ "versioning").headOption.toSeq.flatMap(_.child.collect { case e: Elem => e.label })
+
+  private def updateAll(elem: Elem): Elem =
+    MavenMetadata.update(
+      elem,
+      None,
+      None,
+      Some("1.1.0"),
+      Some("1.1.0"),
+      Seq("1.1.0"),
+      Some(LocalDateTime.parse("2024-01-02T03:04:05"))
+    )
+
+  private val updatedInfo = MavenMetadata.Info(
+    Some("1.1.0"),
+    Some("1.1.0"),
+    Seq("1.1.0"),
+    Some(LocalDateTime.parse("2024-01-02T03:04:05"))
+  )
+
+  test("update adds missing latest, release, versions and lastUpdated, in Maven's order") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId><versioning/></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(versioningLabels(updated), Seq("latest", "release", "versions", "lastUpdated"))
+  }
+
+  test("update adds a missing versioning element") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(
+      updated.child.collect { case e: Elem => e.label },
+      Seq("groupId", "artifactId", "versioning")
+    )
+  }
+
+  test("update inserts missing elements around existing ones, keeping Maven's order") {
+    val elem = XML.loadString(
+      """<metadata><versioning><release>1.0.0</release><lastUpdated>20230607080910</lastUpdated></versioning></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(versioningLabels(updated), Seq("latest", "release", "versions", "lastUpdated"))
+  }
+
+  test("update doesn't add elements it has no value for") {
+    val elem    = XML.loadString("""<metadata><versioning/></metadata>""")
+    val updated = MavenMetadata.update(elem, None, None, None, None, Nil, None)
+    assertEquals(versioningLabels(updated), Nil)
+  }
+
+  test("update doesn't add an empty versioning element") {
+    val elem    = XML.loadString("""<metadata><groupId>org.example</groupId></metadata>""")
+    val updated = MavenMetadata.update(elem, None, None, None, None, Nil, None)
+    assertEquals(updated.child.collect { case e: Elem => e.label }, Seq("groupId"))
+  }
+
+  test("updateMavenMetadata fills in a remote maven-metadata.xml lacking versions") {
+    val remote =
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId><versioning><latest>1.0.0</latest></versioning></metadata>"""
+    val info = metadataInfo(update(moduleFiles("1.1.0"), new MapDownload(Map(mdUrl -> remote))))
+    assertEquals(info.versions, Seq("1.1.0"))
+    assertEquals(info.latest, Some("1.1.0"))
+    assertEquals(info.release, Some("1.1.0"))
   }
 }
