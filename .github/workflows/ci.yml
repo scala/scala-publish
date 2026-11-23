@@ -9,7 +9,11 @@ on:
 
 jobs:
   test:
-    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest", "windows-2025"]
+    runs-on: ${{ matrix.os }}
     needs:
       - format
       - scalafix
@@ -23,7 +27,17 @@ jobs:
       with:
         jvm: temurin:17
     - name: Test
+      if: runner.os != 'Windows'
       run: ./mill __.compile && ./mill __.test
+    # the mill shell launcher doesn't support Windows, use mill.bat there
+    - name: Compile (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./mill.bat __.compile
+    - name: Test (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: ./mill.bat __.test
 
   format:
     timeout-minutes: 15

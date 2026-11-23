@@ -1,0 +1,5 @@
+# Check out files with LF line endings everywhere, including on Windows (multi-line string
+# literals in tests rely on it), except for Windows scripts
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
