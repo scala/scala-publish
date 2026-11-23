@@ -2,9 +2,8 @@ package scala.publish.upload
 
 import coursier.core.Authentication
 
-import scala.annotation.tailrec
 import scala.publish.upload.logger.UploadLogger
-import scala.publish.util.EmaRetryParams
+import scala.publish.util.{EmaRetryParams, Retry}
 
 /** Retries uploads failing with transient errors (see [[Upload.Error.transient]], e.g. HTTP 5xx)
   *
@@ -27,22 +26,13 @@ final case class RetryingUpload(
     content: Array[Byte],
     logger: UploadLogger,
     loggingIdOpt: Option[Object]
-  ): Option[Upload.Error] = {
-    @tailrec
-    def attempt(n: Int, waitMs: Long): Option[Upload.Error] =
-      underlying.upload(url, authentication, content, logger, loggingIdOpt) match {
-        case Some(e) if e.transient && n < retryParams.attempts =>
-          sleep(waitMs)
-          attempt(n + 1, retryParams.update(waitMs))
-        case res =>
-          res
-      }
-
-    attempt(1, retryParams.initialWaitDurationMs)
-  }
+  ): Option[Upload.Error] =
+    Retry(retryParams, sleep)((res: Option[Upload.Error]) => res.exists(_.transient)) { _ =>
+      underlying.upload(url, authentication, content, logger, loggingIdOpt)
+    }
 }
 
 object RetryingUpload {
   def defaultRetryParams: EmaRetryParams  = EmaRetryParams(3, 1000L, 2.0f)
-  private def threadSleep(ms: Long): Unit = Thread.sleep(ms)
+  private def threadSleep(ms: Long): Unit = Retry.threadSleep(ms)
 }

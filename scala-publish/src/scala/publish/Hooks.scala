@@ -7,10 +7,11 @@ import java.io.PrintStream
 import java.util.concurrent.ScheduledExecutorService
 
 import scala.annotation.unused
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.DurationLong
 import scala.publish.fileset.FileSet
 import scala.publish.sonatype.SonatypeApi
 import scala.publish.sonatype.logger.{BatchSonatypeLogger, InteractiveSonatypeLogger}
+import scala.publish.util.EmaRetryParams
 
 trait Hooks {
   type T >: Null
@@ -31,7 +32,8 @@ object Hooks {
     out: PrintStream,
     verbosity: Int,
     batch: Boolean,
-    es: ScheduledExecutorService
+    es: ScheduledExecutorService,
+    statusPollParams: EmaRetryParams = Sonatype.defaultStatusPollParams
   ) extends Hooks {
     private def logger =
       if batch then new BatchSonatypeLogger(out, verbosity)
@@ -77,9 +79,9 @@ object Hooks {
               repositoryId = repoId,
               status = "closed",
               checkActivityOpt = Some("close"),
-              maxAttempt = 20,
-              initialDelay = 3.seconds,
-              backoffFactor = 1.5,
+              maxAttempt = statusPollParams.attempts,
+              initialDelay = statusPollParams.initialWaitDurationMs.millis,
+              backoffFactor = statusPollParams.factor.toDouble,
               es = es
             )
             _ = api.promoteStagingRepository(repoId, "promoting repository")
@@ -88,15 +90,21 @@ object Hooks {
               repositoryId = repoId,
               status = "released",
               checkActivityOpt = Some("release"),
-              maxAttempt = 20,
-              initialDelay = 3.seconds,
-              backoffFactor = 1.5,
+              maxAttempt = statusPollParams.attempts,
+              initialDelay = statusPollParams.initialWaitDurationMs.millis,
+              backoffFactor = statusPollParams.factor.toDouble,
               es = es,
               // promoted with autoDropAfterRelease, so the repository can be gone once released
               missingRepositoryMeansDone = true
             )
           } yield ()
       }
+  }
+
+  object Sonatype {
+
+    /** Default attempts and waits when polling for staging repositories to be closed or released */
+    def defaultStatusPollParams: EmaRetryParams = EmaRetryParams(20, 3000L, 1.5f)
   }
 
   def dummy: Hooks =
@@ -112,4 +120,17 @@ object Hooks {
     batch: Boolean,
     es: ScheduledExecutorService
   ): Hooks = Sonatype(repo, api, out, verbosity, batch, es)
+
+  /** Like [[sonatype]], with custom attempts and waits when polling for the staging repository to
+    * be closed or released (see [[Sonatype.defaultStatusPollParams]] for the defaults)
+    */
+  def sonatype(
+    repo: PublishRepository.Sonatype,
+    api: SonatypeApi,
+    out: PrintStream,
+    verbosity: Int,
+    batch: Boolean,
+    es: ScheduledExecutorService,
+    statusPollParams: EmaRetryParams
+  ): Hooks = Sonatype(repo, api, out, verbosity, batch, es, statusPollParams)
 }

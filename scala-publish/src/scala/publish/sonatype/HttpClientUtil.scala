@@ -95,6 +95,7 @@ private[sonatype] final case class HttpClientUtil(
       val msg =
         s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"
       if resp.code.isClientError then throw new FileNotFoundException(msg)
+      else if resp.code.isServerError then throw new SonatypeApi.ServerError(msg, resp.code.code)
       else throw new Exception(msg)
     }
   }
@@ -135,6 +136,7 @@ private[sonatype] final case class HttpClientUtil(
       val msg =
         s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"
       if resp.code.isClientError then throw new FileNotFoundException(msg)
+      else if resp.code.isServerError then throw new SonatypeApi.ServerError(msg, resp.code.code)
       else throw new Exception(msg)
     }
   }

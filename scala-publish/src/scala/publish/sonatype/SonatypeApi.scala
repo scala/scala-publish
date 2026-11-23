@@ -9,10 +9,9 @@ import sttp.client3.*
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ScheduledExecutorService
 
-import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.publish.sonatype.logger.SonatypeLogger
-import scala.publish.util.EmaRetryParams
+import scala.publish.util.{EmaRetryParams, Retry}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -22,7 +21,9 @@ final case class SonatypeApi(
   authentication: Option[Authentication],
   verbosity: Int,
   retryOnTimeout: Int = 3,
-  stagingRepoRetryParams: EmaRetryParams = EmaRetryParams(3, 10.seconds.toMillis, 2.0f)
+  stagingRepoRetryParams: EmaRetryParams = EmaRetryParams(3, 10.seconds.toMillis, 2.0f),
+  requestRetryParams: Option[EmaRetryParams] = None,
+  sleep: Long => Unit = Retry.threadSleep
 ) {
 
   // vaguely inspired by https://github.com/lihaoyi/mill/blob/7b4ced648ecd9b79b3a16d67552f0bb69f4dd543/scalalib/src/mill/scalalib/publish/SonatypeHttpApi.scala
@@ -35,37 +36,49 @@ final case class SonatypeApi(
       StandardCharsets.UTF_8
     )
 
+  private def getOnce[T: JsonValueCodec](
+    url: String,
+    post: Option[Array[Byte]],
+    nested: Boolean,
+    isJson: Boolean
+  ): T =
+    if nested then clientUtil.get(url, post, nested, isJson)(using Response.codec[T]).data
+    else clientUtil.get[T](url, post, nested, isJson)
+
   private def get[T: JsonValueCodec](
     url: String,
     post: Option[Array[Byte]] = None,
     nested: Boolean = true,
     isJson: Boolean = false
   ): T =
-    if nested then clientUtil.get(url, post, nested, isJson)(using Response.codec[T]).data
-    else clientUtil.get[T](url, post, nested, isJson)
+    retrying(effectiveRequestRetryParams, isPost = post.nonEmpty) { _ =>
+      getOnce(url, post, nested, isJson)
+    }
 
   private val clientUtil = HttpClientUtil(backend, authentication, verbosity)
 
-  private def withRetry[T](task: Int => Task[T]): Task[T] = {
+  /** Attempts and waits for requests failing with transient errors */
+  private def effectiveRequestRetryParams: EmaRetryParams =
+    requestRetryParams.getOrElse(EmaRetryParams(retryOnTimeout, 1000L, 2.0f))
 
-    def helper(attempt: Int): Task[T] =
-      task(attempt).attempt.flatMap {
-        case Left(_: java.net.SocketTimeoutException) if attempt + 1 < retryOnTimeout =>
-          helper(attempt + 1)
-        case other =>
-          Task.fromEither(other)
-      }
-
-    helper(0)
-  }
+  /** Runs `f`, retrying it when it fails with a transient error (see [[SonatypeApi.isTransient]])
+    */
+  private def retrying[T](params: EmaRetryParams, isPost: Boolean)(f: Int => T): T =
+    Retry(params, sleep)((res: Try[T]) => res.failed.toOption.exists(isTransient(_, isPost))) {
+      n => Try(f(n))
+    }.get
 
   def listProfiles(logger: SonatypeLogger = SonatypeLogger.nop): Task[Seq[SonatypeApi.Profile]] = {
 
+    val params = effectiveRequestRetryParams
+
     // for w/e reasons, Profiles.Profile.decode isn't implicitly picked
-    def task(attempt: Int) = Task.delay {
-      logger.listingProfiles(attempt, retryOnTimeout)
+    def attempt(n: Int) = {
+      logger.listingProfiles(n - 1, params.attempts)
       val res =
-        try get(url = s"$base/staging/profiles", isJson = true)(using Profiles.Profile.listCodec)
+        try getOnce(url = s"$base/staging/profiles", None, nested = true, isJson = true)(
+            using Profiles.Profile.listCodec
+          )
             .map(_.profile)
         catch {
           case NonFatal(e) =>
@@ -76,7 +89,7 @@ final case class SonatypeApi(
       res
     }
 
-    withRetry(task)
+    Task.delay(retrying(params, isPost = false)(attempt))
   }
 
   def rawListProfiles(): RawJson =
@@ -140,22 +153,15 @@ final case class SonatypeApi(
   ): Unit = {
     val url  = s"$base/staging/profiles/${profile.id}/$action"
     val body = postBody(writeToArray(StagedRepositoryRequest(description, repositoryId)))
-    @tailrec
-    def sendRequest(attempt: Int, waitDurationMs: Long): Unit = {
+    retrying(stagingRepoRetryParams, isPost = true) { _ =>
       val resp = clientUtil.createResponse(url, post = Some(body), isJson = true)
-
       if !resp.code.isSuccess then {
-        if attempt >= stagingRepoRetryParams.attempts then
-          throw new Exception(
-            s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"
-          )
-
-        Thread.sleep(waitDurationMs)
-        sendRequest(attempt + 1, stagingRepoRetryParams.update(waitDurationMs))
+        val msg =
+          s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"
+        if resp.code.isServerError then throw new ServerError(msg, resp.code.code)
+        else throw new Exception(msg)
       }
     }
-
-    sendRequest(1, stagingRepoRetryParams.initialWaitDurationMs)
   }
 
   def sendCloseStagingRepositoryRequest(
@@ -176,15 +182,17 @@ final case class SonatypeApi(
       Console.err.println(
         s"Promoting staging repository for repository: $repositoryId with description: $description"
       )
-    clientUtil.getEmptyResponse(
-      url = s"$base/staging/bulk/promote",
-      post = Some(postBody(writeToArray(PromoteRequest(
-        stagedRepositoryIds = Seq(repositoryId),
-        description = description,
-        autoDropAfterRelease = true
-      )))),
-      isJson = true
-    )
+    retrying(effectiveRequestRetryParams, isPost = true) { _ =>
+      clientUtil.getEmptyResponse(
+        url = s"$base/staging/bulk/promote",
+        post = Some(postBody(writeToArray(PromoteRequest(
+          stagedRepositoryIds = Seq(repositoryId),
+          description = description,
+          autoDropAfterRelease = true
+        )))),
+        isJson = true
+      )
+    }
   }
 
   def sendDropStagingRepositoryRequest(
@@ -291,6 +299,23 @@ final case class SonatypeApi(
 }
 
 object SonatypeApi {
+
+  /** Thrown when the Sonatype API answers with an HTTP 5xx status */
+  final class ServerError(message: String, val status: Int) extends Exception(message)
+
+  /** Whether a request failing with `t` can be retried
+    *
+    * Connection failures and HTTP 5xx are, as are timeouts for requests not changing anything
+    * (non-POST). Timed out POST requests aren't retried, as they may have been processed.
+    */
+  private[sonatype] def isTransient(t: Throwable, isPost: Boolean): Boolean =
+    t match {
+      case _: ServerError                                                            => true
+      case _: SttpClientException.ConnectException | _: java.net.ConnectException    => true
+      case _: SttpClientException.ReadException | _: java.net.SocketTimeoutException =>
+        !isPost
+      case _ => false
+    }
   final case class Profile(
     id: String,
     name: String,

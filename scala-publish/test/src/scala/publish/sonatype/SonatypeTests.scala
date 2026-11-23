@@ -22,7 +22,8 @@ class SonatypeTests extends ScalaPublishTestSuite {
         authentication = None,
         verbosity = 0,
         retryOnTimeout = 1,
-        stagingRepoRetryParams = EmaRetryParams(20, 100L, 1.0f)
+        stagingRepoRetryParams = EmaRetryParams(20, 100L, 1.0f),
+        sleep = _ => ()
       )
 
       sonatypeApi20.sendCloseStagingRepositoryRequest(
@@ -43,7 +44,8 @@ class SonatypeTests extends ScalaPublishTestSuite {
         base = base,
         authentication = None,
         verbosity = 0,
-        retryOnTimeout = 1
+        retryOnTimeout = 1,
+        sleep = _ => ()
       )
 
       try sonatypeApi3.sendCloseStagingRepositoryRequest(
