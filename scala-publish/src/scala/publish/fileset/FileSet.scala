@@ -10,10 +10,17 @@ import scala.publish.Content
 import scala.publish.Pom.{Developer, License}
 
 final case class FileSet(elements: Seq[(Path, Content)]) {
+
+  /** Adds the files of `other`, removing from this [[FileSet]] the files it overrides, along with
+    * their signatures and checksums
+    */
   def ++(other: FileSet): FileSet = {
-    // complexity possibly not too optimal… (removeAll iterates on all elements)
-    val cleanedUp = other.elements.map(_._1).foldLeft(this)(_.removeAll(_))
-    FileSet(cleanedUp.elements ++ other.elements)
+    val overridden = other.elements.iterator.map(_._1.repr).toSet
+    val kept       = elements.filter {
+      case (p, _) =>
+        !SideFiles.isSameOrSideFileOfAny(p.repr, overridden)
+    }
+    FileSet(kept ++ other.elements)
   }
   def filterOutExtension(extension: String): FileSet = {
     val suffix = "." + extension
@@ -24,11 +31,10 @@ final case class FileSet(elements: Seq[(Path, Content)]) {
 
   /** Removes anything looking like a checksum or signature related to `path` */
   def removeAll(path: Path): FileSet = {
-
-    val prefix         = path.repr + "."
+    val repr           = path.repr
     val (remove, keep) = elements.partition {
       case (p, _) =>
-        p == path || p.repr.startsWith(prefix)
+        SideFiles.isSameOrSideFileOf(p.repr, repr)
     }
 
     if remove.isEmpty then this else FileSet(keep)

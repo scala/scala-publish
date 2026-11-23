@@ -183,20 +183,28 @@ class SonatypeStagingFlowTests extends ScalaPublishTestSuite {
   }
 
   test("close failure reported by repository activity fails fast with its message") {
-    val server = new FakeStagingServer(closeFailure = Some("Missing: no javadoc jar found"))
+    val server = new FakeStagingServer(closeFailures = Seq("Missing: no javadoc jar found"))
     val hooks  = hooksFor(server)
     val data   = run(hooks.beforeUpload(fileSet("org.example"), isSnapshot = false))
     val e      = intercept[Exception](run(hooks.afterUpload(data)))
-    // Only check the important parts: the message currently renders the errors as `List(...)`
-    // (see suggestions.md), which may get cleaned up.
-    assert(
-      e.getMessage.startsWith(
-        s"Error waiting for repository ${server.stagedRepoId} to be closed: "
-      ),
-      clue = e.getMessage
+    assertEquals(
+      e.getMessage,
+      s"Error waiting for repository ${server.stagedRepoId} to be closed: Missing: no javadoc jar found"
     )
-    assert(e.getMessage.contains("Missing: no javadoc jar found"), clue = e.getMessage)
     assert(!server.calls.exists(_.path.endsWith("/bulk/promote")))
+  }
+
+  test("several close failures are listed comma-separated") {
+    val server = new FakeStagingServer(closeFailures =
+      Seq("Missing: no javadoc jar found", "Invalid POM: missing <scm>")
+    )
+    val hooks = hooksFor(server)
+    val data  = run(hooks.beforeUpload(fileSet("org.example"), isSnapshot = false))
+    val e     = intercept[Exception](run(hooks.afterUpload(data)))
+    assertEquals(
+      e.getMessage,
+      s"""Error waiting for repository ${server.stagedRepoId} to be closed: Missing: no javadoc jar found, Invalid POM: missing <scm>"""
+    )
   }
 
   test("waitForStatus gives up after maxAttempt") {
@@ -322,7 +330,7 @@ object SonatypeStagingFlowTests {
   final class FakeStagingServer(
     profilesStatus: StatusCode = StatusCode.Ok,
     finishStatus: StatusCode = StatusCode.Created,
-    closeFailure: Option[String] = None
+    closeFailures: Seq[String] = Nil
   ) {
     val repoBase     = "https://staging.example.test"
     val apiBase      = s"$repoBase/service/local"
@@ -375,7 +383,7 @@ object SonatypeStagingFlowTests {
         case (Method.POST, p)
             if p == s"/service/local/staging/profiles/${profileExample.id}/finish" =>
           if finishStatus.isSuccess then {
-            if closeFailure.isEmpty then repoStatus = "closed"
+            if closeFailures.isEmpty then repoStatus = "closed"
             json("", finishStatus)
           }
           else json("finish failed", finishStatus)
@@ -391,9 +399,9 @@ object SonatypeStagingFlowTests {
           )
 
         case (Method.GET, p) if p == s"/service/local/staging/repository/$stagedRepoId/activity" =>
-          val events = closeFailure.fold("") { msg =>
+          val events = closeFailures.map { msg =>
             s"""{"name":"ruleFailed","severity":1,"properties":[{"name":"failureMessage","value":"$msg"}]}"""
-          }
+          }.mkString(",")
           json(s"""[{"name":"close","events":[$events]}]""")
 
         case _ =>
