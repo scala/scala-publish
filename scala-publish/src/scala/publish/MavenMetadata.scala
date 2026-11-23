@@ -1,6 +1,7 @@
 package scala.publish
 
 import coursier.core.{ModuleName, Organization}
+import coursier.version.Version
 
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, LocalDateTime, ZoneOffset}
@@ -55,6 +56,10 @@ object MavenMetadata {
       versions,
       lastUpdated.atOffset(ZoneOffset.UTC).toLocalDateTime
     )
+
+  /** The highest of the passed versions, ignoring empty ones */
+  def highestVersion(versions: Option[String]*): Option[String] =
+    versions.flatten.filter(_.trim.nonEmpty).maxByOption(Version(_))
 
   def isReleaseVersion(version: String): Boolean =
     // kind of flaky…

@@ -179,12 +179,26 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
     )
   }
 
-  // Known bug, remove `.fail` once fixed.
-  test("updateMavenMetadata doesn't move latest / release back to an older version".fail) {
+  test("updateMavenMetadata doesn't move latest / release back to an older version") {
     val download = new MapDownload(Map(mdUrl -> metadata("1.0.0", "2.0.0")))
     val info     = metadataInfo(update(moduleFiles("1.0.1"), download))
     assertEquals(info.versions, Seq("1.0.0", "2.0.0", "1.0.1"))
     assertEquals(info.latest, Some("2.0.0"))
     assertEquals(info.release, Some("2.0.0"))
+  }
+
+  test("updateMavenMetadata moves latest to a newer pre-release, but keeps release") {
+    val download = new MapDownload(Map(mdUrl -> metadata("0.9.0", "1.0.0")))
+    val info     = metadataInfo(update(moduleFiles("1.1.0-RC1"), download))
+    assertEquals(info.versions, Seq("0.9.0", "1.0.0", "1.1.0-RC1"))
+    assertEquals(info.latest, Some("1.1.0-RC1"))
+    assertEquals(info.release, Some("1.0.0"))
+  }
+
+  test("highestVersion compares versions, not strings, and ignores empty ones") {
+    assertEquals(MavenMetadata.highestVersion(Some("1.9.0"), Some("1.10.0")), Some("1.10.0"))
+    assertEquals(MavenMetadata.highestVersion(Some("2.0.0"), Some("2.0.0-RC1")), Some("2.0.0"))
+    assertEquals(MavenMetadata.highestVersion(Some(""), Some("1.0.0")), Some("1.0.0"))
+    assertEquals(MavenMetadata.highestVersion(None, None), None)
   }
 }

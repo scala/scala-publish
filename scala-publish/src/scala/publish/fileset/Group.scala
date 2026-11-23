@@ -832,15 +832,16 @@ object Group {
 
               val elem = others.foldLeft(mainElem) {
                 case (mainElem0, m0) =>
-                  val b    = m0.xmlOpt.get.content()
-                  val elem = XML.loadString(new String(b, StandardCharsets.UTF_8))
-                  val info = publish.MavenMetadata.info(elem)
+                  val b        = m0.xmlOpt.get.content()
+                  val elem     = XML.loadString(new String(b, StandardCharsets.UTF_8))
+                  val info     = publish.MavenMetadata.info(elem)
+                  val mainInfo = publish.MavenMetadata.info(mainElem0)
                   publish.MavenMetadata.update(
                     mainElem0,
                     None,
                     None,
-                    info.latest,
-                    info.release,
+                    publish.MavenMetadata.highestVersion(mainInfo.latest, info.latest),
+                    publish.MavenMetadata.highestVersion(mainInfo.release, info.release),
                     info.versions,
                     info.lastUpdated
                   )
