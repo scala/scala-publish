@@ -119,9 +119,9 @@ object Pom {
             <developer>
                 <id>{d.id}</id>
                 <name>{d.name}</name>
+                {d.mail.fold[NodeSeq](Nil)(m => <email>{m}</email>)}
                 <url>{d.url}</url>
               </developer>
-            // + optional mail
           }
         }
         </developers>

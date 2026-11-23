@@ -99,4 +99,46 @@ class PomTests extends ScalaPublishTestSuite {
       )
     }
   }
+
+  private def developersOf(developers: Seq[Pom.Developer]): Seq[Elem] = {
+    val pom = Pom.create(
+      organization = Organization("org.example"),
+      moduleName = ModuleName("lib_3"),
+      version = "1.0.0",
+      developers = developers
+    )
+    (XML.loadString(pom) \ "developers" \ "developer").collect { case e: Elem => e }
+  }
+
+  test("developer email is rendered when provided, in Maven schema order") {
+    val devs = developersOf(Seq(
+      Pom.Developer("jdoe", "Jane Doe", "https://example.com/jdoe", Some("jane@example.com"))
+    ))
+    assertEquals(devs.length, 1)
+    val dev = devs.head
+    assertEquals(dev.child.collect { case e: Elem => e.label }, Seq("id", "name", "email", "url"))
+    assertEquals((dev \ "email").text, "jane@example.com")
+    assertEquals((dev \ "id").text, "jdoe")
+    assertEquals((dev \ "name").text, "Jane Doe")
+    assertEquals((dev \ "url").text, "https://example.com/jdoe")
+  }
+
+  test("no <email> element when the developer has no email") {
+    val devs =
+      developersOf(Seq(Pom.Developer("jdoe", "Jane Doe", "https://example.com/jdoe", None)))
+    assertEquals(devs.length, 1)
+    assertEquals(devs.head.child.collect { case e: Elem => e.label }, Seq("id", "name", "url"))
+  }
+
+  test("several developers keep their order and their own emails") {
+    val devs = developersOf(Seq(
+      Pom.Developer("a", "A", "https://example.com/a", Some("a@example.com")),
+      Pom.Developer("b", "B", "https://example.com/b", None),
+      Pom.Developer("c", "C", "https://example.com/c", Some("c@example.com"))
+    ))
+    assertEquals(
+      devs.map(d => ((d \ "id").text, (d \ "email").map(_.text).headOption)),
+      Seq("a" -> Some("a@example.com"), "b" -> None, "c" -> Some("c@example.com"))
+    )
+  }
 }
