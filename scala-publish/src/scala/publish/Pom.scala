@@ -136,7 +136,7 @@ object Pom {
                   <groupId>{depOrg.value}</groupId>
                   <artifactId>{depName.value}</artifactId>
                   <version>{ver}</version>
-                  {confOpt.fold[NodeSeq](Nil)(c => <scope>{c}</scope>)}
+                  {confOpt.fold[NodeSeq](Nil)(c => <scope>{c.value}</scope>)}
                   {
                 if exclusions.nonEmpty then
                   <exclusions>{
