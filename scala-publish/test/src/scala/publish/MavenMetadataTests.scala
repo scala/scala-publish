@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutorService}
 import scala.publish.download.Download
 import scala.publish.download.logger.DownloadLogger
 import scala.publish.fileset.{FileSet, Path}
-import scala.xml.XML
+import scala.xml.{Elem, XML}
 
 class MavenMetadataTests extends ScalaPublishTestSuite {
 
@@ -179,12 +179,180 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
     )
   }
 
-  // Known bug, remove `.fail` once fixed.
-  test("updateMavenMetadata doesn't move latest / release back to an older version".fail) {
+  test("updateMavenMetadata doesn't move latest / release back to an older version") {
     val download = new MapDownload(Map(mdUrl -> metadata("1.0.0", "2.0.0")))
     val info     = metadataInfo(update(moduleFiles("1.0.1"), download))
     assertEquals(info.versions, Seq("1.0.0", "2.0.0", "1.0.1"))
     assertEquals(info.latest, Some("2.0.0"))
     assertEquals(info.release, Some("2.0.0"))
   }
+
+  test("updateMavenMetadata moves latest to a newer pre-release, but keeps release") {
+    val download = new MapDownload(Map(mdUrl -> metadata("0.9.0", "1.0.0")))
+    val info     = metadataInfo(update(moduleFiles("1.1.0-RC1"), download))
+    assertEquals(info.versions, Seq("0.9.0", "1.0.0", "1.1.0-RC1"))
+    assertEquals(info.latest, Some("1.1.0-RC1"))
+    assertEquals(info.release, Some("1.0.0"))
+  }
+
+  test("highestVersion compares versions, not strings, and ignores empty ones") {
+    assertEquals(MavenMetadata.highestVersion(Some("1.9.0"), Some("1.10.0")), Some("1.10.0"))
+    assertEquals(MavenMetadata.highestVersion(Some("2.0.0"), Some("2.0.0-RC1")), Some("2.0.0"))
+    assertEquals(MavenMetadata.highestVersion(Some(""), Some("1.0.0")), Some("1.0.0"))
+    assertEquals(MavenMetadata.highestVersion(None, None), None)
+  }
+
+  private def versioningLabels(elem: Elem): Seq[String] =
+    (elem \ "versioning").headOption.toSeq.flatMap(_.child.collect { case e: Elem => e.label })
+
+  private def updateAll(elem: Elem): Elem =
+    MavenMetadata.update(
+      elem,
+      None,
+      None,
+      Some("1.1.0"),
+      Some("1.1.0"),
+      Seq("1.1.0"),
+      Some(LocalDateTime.parse("2024-01-02T03:04:05"))
+    )
+
+  private val updatedInfo = MavenMetadata.Info(
+    Some("1.1.0"),
+    Some("1.1.0"),
+    Seq("1.1.0"),
+    Some(LocalDateTime.parse("2024-01-02T03:04:05"))
+  )
+
+  test("update adds missing latest, release, versions and lastUpdated, in Maven's order") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId><versioning/></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(versioningLabels(updated), Seq("latest", "release", "versions", "lastUpdated"))
+  }
+
+  test("update adds a missing versioning element") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(
+      updated.child.collect { case e: Elem => e.label },
+      Seq("groupId", "artifactId", "versioning")
+    )
+  }
+
+  test("update inserts missing elements around existing ones, keeping Maven's order") {
+    val elem = XML.loadString(
+      """<metadata><versioning><release>1.0.0</release><lastUpdated>20230607080910</lastUpdated></versioning></metadata>"""
+    )
+    val updated = updateAll(elem)
+    assertEquals(MavenMetadata.info(updated), updatedInfo)
+    assertEquals(versioningLabels(updated), Seq("latest", "release", "versions", "lastUpdated"))
+  }
+
+  test("update doesn't add elements it has no value for") {
+    val elem    = XML.loadString("""<metadata><versioning/></metadata>""")
+    val updated = MavenMetadata.update(elem, None, None, None, None, Nil, None)
+    assertEquals(versioningLabels(updated), Nil)
+  }
+
+  test("update doesn't add an empty versioning element") {
+    val elem    = XML.loadString("""<metadata><groupId>org.example</groupId></metadata>""")
+    val updated = MavenMetadata.update(elem, None, None, None, None, Nil, None)
+    assertEquals(updated.child.collect { case e: Elem => e.label }, Seq("groupId"))
+  }
+
+  test("updateMavenMetadata fills in a remote maven-metadata.xml lacking versions") {
+    val remote =
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId><versioning><latest>1.0.0</latest></versioning></metadata>"""
+    val info = metadataInfo(update(moduleFiles("1.1.0"), new MapDownload(Map(mdUrl -> remote))))
+    assertEquals(info.versions, Seq("1.1.0"))
+    assertEquals(info.latest, Some("1.1.0"))
+    assertEquals(info.release, Some("1.1.0"))
+  }
+
+  private val snapshotTime = LocalDateTime.parse("2024-01-02T03:04:05")
+  private val snapshotJar  = (None, "jar", "1.0.0-20240102.030405-3", snapshotTime)
+
+  private def updateSnapshot(elem: Elem): Elem =
+    MavenMetadata.updateSnapshotVersioning(
+      elem,
+      None,
+      None,
+      Some("1.0.0-SNAPSHOT"),
+      Some((snapshotTime, 3)),
+      Some(snapshotTime),
+      Seq(snapshotJar)
+    )
+
+  private def snapshotVersionValues(elem: Elem): Seq[String] =
+    (elem \ "versioning" \ "snapshotVersions" \ "snapshotVersion" \ "value").map(_.text)
+
+  test("updateSnapshotVersioning adds missing snapshot, lastUpdated and snapshotVersions") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId><version>1.0.0-SNAPSHOT</version><versioning/></metadata>"""
+    )
+    val updated = updateSnapshot(elem)
+    assertEquals(MavenMetadata.currentSnapshotVersioning(updated), Some((3, snapshotTime)))
+    assertEquals(MavenMetadata.info(updated).lastUpdated, Some(snapshotTime))
+    assertEquals(snapshotVersionValues(updated), Seq("1.0.0-20240102.030405-3"))
+    // same order as Maven: snapshot, lastUpdated, snapshotVersions
+    assertEquals(versioningLabels(updated), Seq("snapshot", "lastUpdated", "snapshotVersions"))
+  }
+
+  test("updateSnapshotVersioning puts a missing snapshot before an existing lastUpdated") {
+    val elem = XML.loadString(
+      """<metadata><version>1.0.0-SNAPSHOT</version><versioning><lastUpdated>20230607080910</lastUpdated><snapshotVersions/></versioning></metadata>"""
+    )
+    val updated = updateSnapshot(elem)
+    assertEquals(versioningLabels(updated), Seq("snapshot", "lastUpdated", "snapshotVersions"))
+    assertEquals(MavenMetadata.currentSnapshotVersioning(updated), Some((3, snapshotTime)))
+  }
+
+  test("updateSnapshotVersioning adds missing version and versioning elements") {
+    val elem = XML.loadString(
+      """<metadata><groupId>org.example</groupId><artifactId>lib_3</artifactId></metadata>"""
+    )
+    val updated = updateSnapshot(elem)
+    assertEquals(
+      updated.child.collect { case e: Elem => e.label },
+      Seq("groupId", "artifactId", "version", "versioning")
+    )
+    assertEquals((updated \ "version").text, "1.0.0-SNAPSHOT")
+    assertEquals(versioningLabels(updated), Seq("snapshot", "lastUpdated", "snapshotVersions"))
+  }
+
+  test("updateSnapshotVersioning doesn't add elements it has no value for") {
+    val elem    = XML.loadString("""<metadata><groupId>org.example</groupId></metadata>""")
+    val updated = MavenMetadata.updateSnapshotVersioning(elem, None, None, None, None, None, Nil)
+    assertEquals(updated.child.collect { case e: Elem => e.label }, Seq("groupId"))
+  }
+
+  test("updateMavenMetadata fails, rather than overwriting, when the repository refuses access") {
+    val backend = sttp.client3.testing.SttpBackendStub.synchronous.whenAnyRequest
+      .thenRespondWithCode(sttp.model.StatusCode.Unauthorized)
+    intercept[download.Download.Error.Unauthorized] {
+      update(moduleFiles("1.1.0"), download.HttpDownload(backend))
+    }
+  }
+
+  for (
+    snapshot <- Seq(
+      "<buildNumber>3</buildNumber>",
+      "<timestamp>20240102.030405</timestamp>"
+    )
+  )
+    test(s"currentSnapshotVersioning reports incomplete snapshot info ($snapshot)") {
+      val elem = XML.loadString(
+        s"<metadata><versioning><snapshot>$snapshot</snapshot></versioning></metadata>"
+      )
+      val e = intercept[InvalidMetadataException](MavenMetadata.currentSnapshotVersioning(elem))
+      assert(
+        e.getMessage.startsWith("Incomplete <snapshot> in maven-metadata.xml"),
+        clue = e.getMessage
+      )
+    }
 }

@@ -61,4 +61,95 @@ class GroupTests extends ScalaPublishTestSuite {
       .addSnapshotVersioning(now.plusSeconds(60), Set.empty)
     assertEquals(second.snapshotVersioning, Some("1.020240102.030505-2"))
   }
+
+  test("addSnapshotVersioning lists artifacts when existing metadata has no snapshotVersions") {
+    val existing =
+      """<metadata><groupId>org.example</groupId><artifactId>lib</artifactId><version>1.0-SNAPSHOT</version><versioning><snapshot><timestamp>20240101.000000</timestamp><buildNumber>4</buildNumber></snapshot><lastUpdated>20240101000000</lastUpdated></versioning></metadata>"""
+    val m       = module("1.0-SNAPSHOT")
+    val updated = m
+      .copy(files = m.files.update("maven-metadata.xml", Content.InMemory(now, existing.getBytes)))
+      .addSnapshotVersioning(now, Set.empty)
+    assertEquals(updated.snapshotVersioning, Some("1.0-20240102.030405-5"))
+    assertEquals(snapshotValues(updated), Seq.fill(3)("1.0-20240102.030405-5"))
+  }
+
+  private def withFile(m: Group.Module, name: String): Group.Module =
+    m.copy(files = m.files.update(name, Content.InMemory(now, Array[Byte]())))
+
+  test("addSnapshotVersioning reports unrecognized files") {
+    val e = intercept[IllegalArgumentException] {
+      withFile(module("1.0-SNAPSHOT"), "README.md").addSnapshotVersioning(now, Set.empty)
+    }
+    assertEquals(
+      e.getMessage,
+      "Unrecognized file in org.example:lib:1.0-SNAPSHOT: README.md"
+    )
+  }
+
+  test("addSnapshotVersioning reports classifier files without an extension") {
+    val e = intercept[IllegalArgumentException] {
+      withFile(module("1.0-SNAPSHOT"), "lib-1.0-SNAPSHOT-foo").addSnapshotVersioning(now, Set.empty)
+    }
+    assertEquals(
+      e.getMessage,
+      "Unrecognized file in org.example:lib:1.0-SNAPSHOT: lib-1.0-SNAPSHOT-foo (no extension)"
+    )
+  }
+
+  test("addSnapshotVersioning starts at build 1 when existing metadata has no <snapshot>") {
+    val existing =
+      """<metadata><groupId>org.example</groupId><artifactId>lib</artifactId><version>1.0-SNAPSHOT</version></metadata>"""
+    val m       = module("1.0-SNAPSHOT")
+    val updated = m
+      .copy(files = m.files.update("maven-metadata.xml", Content.InMemory(now, existing.getBytes)))
+      .addSnapshotVersioning(now, Set.empty)
+    assertEquals(updated.snapshotVersioning, Some("1.0-20240102.030405-1"))
+    assertEquals(snapshotValues(updated), Seq.fill(3)("1.0-20240102.030405-1"))
+  }
+
+  for (
+    path <- Seq(
+      Seq("lib.jar"),
+      Seq("org", "lib.jar"),
+      Seq("example", "lib", "lib.jar")
+    )
+  )
+    test(s"split reports files at unexpected locations (${path.mkString("/")})") {
+      val fs = FileSet(Seq(Path(path) -> Content.InMemory(now, Array[Byte]())))
+      val e  = intercept[IllegalArgumentException](Group.split(fs))
+      assert(e.getMessage.startsWith("Unexpected file location"), clue = e.getMessage)
+      assert(e.getMessage.contains(path.mkString("/")), clue = e.getMessage)
+    }
+
+  test("merge reports duplicated modules as a Left") {
+    val res = Group.merge(Seq(module("1.0"), module("1.0")))
+    assertEquals(res, Left("Duplicated modules: org.example:lib:1.0"))
+  }
+
+  test("merge reports duplicated maven-metadata.xml groups as a Left") {
+    val md = Group.MavenMetadata(
+      Organization("org.example"),
+      ModuleName("lib"),
+      DirContent(Seq("maven-metadata.xml" -> Content.InMemory(now, "<metadata/>".getBytes)))
+    )
+    val res = Group.merge(Seq(md, md))
+    assertEquals(res, Left("Duplicated maven-metadata.xml: org.example:lib"))
+  }
+
+  test("addOrUpdateMavenMetadata reports duplicated maven-metadata.xml groups") {
+    val md = Group.MavenMetadata(
+      Organization("org.example"),
+      ModuleName("lib"),
+      DirContent(Seq("maven-metadata.xml" -> Content.InMemory(now, "<metadata/>".getBytes)))
+    )
+    val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    try {
+      val e = intercept[IllegalArgumentException] {
+        Group.addOrUpdateMavenMetadata(Seq(module("1.0"), md, md), now, pool)
+          .unsafeRun()(using scala.concurrent.ExecutionContext.fromExecutorService(pool))
+      }
+      assertEquals(e.getMessage, "Duplicated maven-metadata.xml: org.example:lib")
+    }
+    finally pool.shutdown()
+  }
 }

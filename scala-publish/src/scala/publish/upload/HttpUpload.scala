@@ -7,7 +7,7 @@ import sttp.model.{Header, Uri}
 import java.io.InputStream
 
 import scala.publish.upload.logger.UploadLogger
-import scala.publish.util.BasicRealm
+import scala.publish.util.{BasicRealm, Urls}
 
 final case class HttpUpload(
   backend: SttpBackend[Identity, Any],
@@ -20,9 +20,8 @@ final case class HttpUpload(
     logger: UploadLogger,
     loggingIdOpt: Option[Object]
   ): Option[Upload.Error] = {
-    val maybeUri = Uri.parse(url).left.map { _ =>
-      ???
-    }
+    val maybeUri: Either[Upload.Error, Uri] =
+      Urls.parse(url).left.map(e => new Upload.Error.UploadError(url, e))
 
     val bodyInputStream: InputStream =
       new InputStream {

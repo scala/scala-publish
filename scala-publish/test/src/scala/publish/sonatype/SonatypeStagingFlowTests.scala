@@ -286,6 +286,16 @@ class SonatypeStagingFlowTests extends ScalaPublishTestSuite {
       noWaitRetryParams.attempts
     )
   }
+
+  test("an invalid API URL is an IllegalArgumentException") {
+    val server = new FakeStagingServer
+    val api = SonatypeApi(server.backend, "https://staging.example.test/%zz", None, verbosity = -1)
+    val e   = intercept[IllegalArgumentException](run(api.listProfiles()))
+    assert(
+      e.getMessage.startsWith("Invalid URL: https://staging.example.test/%zz/staging/profiles"),
+      clue = e.getMessage
+    )
+  }
 }
 
 object SonatypeStagingFlowTests {
@@ -412,4 +422,5 @@ object SonatypeStagingFlowTests {
     val backend: SttpBackendStub[sttp.client3.Identity, Any] =
       SttpBackendStub.synchronous.whenAnyRequest.thenRespondF(r => handle(r))
   }
+
 }

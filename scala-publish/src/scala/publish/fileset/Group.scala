@@ -383,7 +383,10 @@ object Group {
           case (n, _) if n.startsWith(initialFilePrefix + "-") =>
             val suffix = n.stripPrefix(initialFilePrefix + "-")
             val idx    = suffix.indexOf('.')
-            if idx < 0 then ???
+            if idx < 0 then
+              throw new IllegalArgumentException(
+                s"Unrecognized file in ${organization.value}:${name.value}:$version: $n (no extension)"
+              )
             else if ignoreExtensions.exists(e => n.endsWith("." + e)) then Nil
             else {
               val classifier = suffix.take(idx)
@@ -399,9 +402,10 @@ object Group {
             Nil
           case ("maven-metadata.xml", _) =>
             Nil
-          case (_, _) =>
-            // unrecognized file…
-            ???
+          case (n, _) =>
+            throw new IllegalArgumentException(
+              s"Unrecognized file in ${organization.value}:${name.value}:$version: $n"
+            )
         }.flatten
       }
 
@@ -431,19 +435,9 @@ object Group {
             artifacts(buildNumber)
           )
         case Some(c) =>
-          val b                    = c.content()
-          val elem                 = XML.loadString(new String(b, StandardCharsets.UTF_8))
-          val latestSnapshotParams =
-            publish.MavenMetadata.currentSnapshotVersioning(elem).getOrElse {
-              ???
-            }
-          val latestSnapshotVer =
-            timestampedVersion(latestSnapshotParams._2, latestSnapshotParams._1)
-          if snapshotVersioning.contains(latestSnapshotVer) then
-            latestSnapshotParams._1 ->
-              elem // kind of meh, this is in case the source already has snapshot ver, and the dest hasn't, so the current maven metadata only comes from the source
-          else {
-            val buildNumber = latestSnapshotParams._1 + 1
+          val b                           = c.content()
+          val elem                        = XML.loadString(new String(b, StandardCharsets.UTF_8))
+          def withBuild(buildNumber: Int) =
             buildNumber -> publish.MavenMetadata.updateSnapshotVersioning(
               elem,
               None,
@@ -453,6 +447,17 @@ object Group {
               Some(now.atZone(ZoneOffset.UTC).toLocalDateTime),
               artifacts(buildNumber)
             )
+          publish.MavenMetadata.currentSnapshotVersioning(elem) match {
+            case None =>
+              // existing metadata, but no snapshot published yet
+              withBuild(1)
+            case Some(latestSnapshotParams) =>
+              val latestSnapshotVer =
+                timestampedVersion(latestSnapshotParams._2, latestSnapshotParams._1)
+              if snapshotVersioning.contains(latestSnapshotVer) then
+                latestSnapshotParams._1 ->
+                  elem // kind of meh, this is in case the source already has snapshot ver, and the dest hasn't, so the current maven metadata only comes from the source
+              else withBuild(latestSnapshotParams._1 + 1)
           }
       }
 
@@ -647,7 +652,11 @@ object Group {
               )
 
           case _ =>
-            ???
+            throw new IllegalArgumentException(
+              "Unexpected file location, expected <organization path>/<name>/<version>/<file> " +
+                "or <organization path>/<name>/maven-metadata.xml: " +
+                elements.map(_._1.repr).mkString(", ")
+            )
         }
     }
   }
@@ -674,7 +683,21 @@ object Group {
 
     if duplicatedModules.isEmpty && duplicatedMeta.isEmpty then
       Right(groups.foldLeft(FileSet.empty)(_ ++ _.fileSet))
-    else ???
+    else {
+      val modulesMessage = Option.when(duplicatedModules.nonEmpty) {
+        val keys = duplicatedModules.keys
+          .map((org, name, ver) => s"${org.value}:${name.value}:$ver")
+          .toVector
+          .sorted
+        s"Duplicated modules: ${keys.mkString(", ")}"
+      }
+      val metaMessage = Option.when(duplicatedMeta.nonEmpty) {
+        val keys =
+          duplicatedMeta.keys.map((org, name) => s"${org.value}:${name.value}").toVector.sorted
+        s"Duplicated maven-metadata.xml: ${keys.mkString(", ")}"
+      }
+      Left((modulesMessage.toSeq ++ metaMessage.toSeq).mkString("; "))
+    }
   }
 
   private[publish] def mergeUnsafe(groups: Seq[Group]): FileSet =
@@ -697,12 +720,14 @@ object Group {
     val meta = groups
       .collect { case m: Group.MavenMetadata => m }
       .groupBy(m => (m.organization, m.name))
-      .view
-      .mapValues {
-        case Seq(md) => md
-        case _       => ???
-      }
       .iterator
+      .map {
+        case (k, Seq(md))     => k -> md
+        case ((org, name), _) =>
+          throw new IllegalArgumentException(
+            s"Duplicated maven-metadata.xml: ${org.value}:${name.value}"
+          )
+      }
       .toMap
 
     val a = modules.toSeq.map {
@@ -832,15 +857,16 @@ object Group {
 
               val elem = others.foldLeft(mainElem) {
                 case (mainElem0, m0) =>
-                  val b    = m0.xmlOpt.get.content()
-                  val elem = XML.loadString(new String(b, StandardCharsets.UTF_8))
-                  val info = publish.MavenMetadata.info(elem)
+                  val b        = m0.xmlOpt.get.content()
+                  val elem     = XML.loadString(new String(b, StandardCharsets.UTF_8))
+                  val info     = publish.MavenMetadata.info(elem)
+                  val mainInfo = publish.MavenMetadata.info(mainElem0)
                   publish.MavenMetadata.update(
                     mainElem0,
                     None,
                     None,
-                    info.latest,
-                    info.release,
+                    publish.MavenMetadata.highestVersion(mainInfo.latest, info.latest),
+                    publish.MavenMetadata.highestVersion(mainInfo.release, info.release),
                     info.versions,
                     info.lastUpdated
                   )
