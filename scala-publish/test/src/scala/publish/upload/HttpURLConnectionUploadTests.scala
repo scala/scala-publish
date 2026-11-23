@@ -7,6 +7,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 import scala.publish.ScalaPublishTestSuite
 import scala.publish.upload.logger.UploadLogger
 
@@ -139,6 +140,68 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
     ) { (base, _) =>
       val res = upload.upload(s"$base/lib.jar", None, Array[Byte](1), logger)
       assertEquals(logged.toList.map(_.map(_.getMessage)), List(res.map(_.getMessage)))
+    }
+  }
+
+  test("create(Timeouts) maps the connect and read timeouts to the right settings") {
+    val timeouts =
+      HttpURLConnectionUpload.Timeouts(connect = Some(1.second), read = Some(2.seconds))
+    assertEquals(
+      HttpURLConnectionUpload.create(timeouts),
+      HttpURLConnectionUpload(
+        urlSuffix = "",
+        readTimeoutMsOpt = Some(2000),
+        connectTimeoutMsOpt = Some(1000)
+      )
+    )
+    assertEquals(
+      HttpURLConnectionUpload.create(timeouts, urlSuffix = ".suffix"),
+      HttpURLConnectionUpload(
+        ".suffix",
+        readTimeoutMsOpt = Some(2000),
+        connectTimeoutMsOpt = Some(1000)
+      )
+    )
+  }
+
+  test("Timeouts default to no timeout") {
+    assertEquals(
+      HttpURLConnectionUpload.create(HttpURLConnectionUpload.Timeouts()),
+      HttpURLConnectionUpload("", None, None)
+    )
+  }
+
+  test("Timeouts larger than Int.MaxValue milliseconds are capped") {
+    val upload = HttpURLConnectionUpload.create(
+      HttpURLConnectionUpload.Timeouts(connect = Some(100000.days), read = Some(100000.days))
+    )
+    assertEquals(upload, HttpURLConnectionUpload("", Some(Int.MaxValue), Some(Int.MaxValue)))
+  }
+
+  test("negative Timeouts are rejected") {
+    val minusOneSecond = 1.second * -1
+    intercept[IllegalArgumentException](HttpURLConnectionUpload.Timeouts(connect =
+      Some(minusOneSecond)
+    ))
+    intercept[IllegalArgumentException](HttpURLConnectionUpload.Timeouts(read =
+      Some(minusOneSecond)
+    ))
+  }
+
+  test("the read timeout from Timeouts is applied to the request") {
+    withServer { exchange =>
+      Thread.sleep(1500)
+      reply(exchange, 201)
+    } { (base, _) =>
+      val upload = HttpURLConnectionUpload.create(
+        HttpURLConnectionUpload.Timeouts(read = Some(200.millis))
+      )
+      val start = System.nanoTime()
+      intercept[java.net.SocketTimeoutException] {
+        upload.upload(s"$base/lib.jar", None, Array[Byte](1), nop)
+      }
+      val elapsedMs = (System.nanoTime() - start) / 1000000L
+      assert(elapsedMs < 1200L, clue = s"took $elapsedMs ms")
     }
   }
 }

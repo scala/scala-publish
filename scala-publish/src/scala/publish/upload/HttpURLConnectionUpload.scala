@@ -6,6 +6,7 @@ import java.io.{ByteArrayOutputStream, InputStream, OutputStream}
 import java.net.{HttpURLConnection, URI}
 import java.nio.charset.StandardCharsets
 
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.jdk.CollectionConverters.*
 import scala.publish.upload.logger.UploadLogger
 import scala.publish.util.BasicRealm
@@ -142,6 +143,32 @@ object HttpURLConnectionUpload {
   def create(): Upload                  = HttpURLConnectionUpload("", None, None)
   def create(urlSuffix: String): Upload = HttpURLConnectionUpload(urlSuffix, None, None)
 
+  /** Timeouts of the HTTP requests sent by [[HttpURLConnectionUpload]].
+    *
+    * @param connect
+    *   timeout for establishing the connection, none if unset
+    * @param read
+    *   timeout for reading the response once connected, none if unset
+    */
+  final case class Timeouts(
+    connect: Option[FiniteDuration] = None,
+    read: Option[FiniteDuration] = None
+  ) {
+    require(connect.forall(_ >= Duration.Zero), s"Negative connect timeout: $connect")
+    require(read.forall(_ >= Duration.Zero), s"Negative read timeout: $read")
+  }
+
+  private def toMillis(duration: FiniteDuration): Int =
+    math.min(duration.toMillis, Int.MaxValue.toLong).toInt
+
+  /** Create a HttpURLConnectionUpload with the passed timeouts */
+  def create(timeouts: Timeouts): Upload =
+    create(timeouts, "")
+
+  /** Create a HttpURLConnectionUpload with the passed timeouts, appending `urlSuffix` to URLs */
+  def create(timeouts: Timeouts, urlSuffix: String): Upload =
+    HttpURLConnectionUpload(urlSuffix, timeouts.read.map(toMillis), timeouts.connect.map(toMillis))
+
   /** Create a HttpURLConnectionUpload with a read timeout
     * @param readTimeoutMs
     *   the response read timeout in miliseconds
@@ -150,6 +177,10 @@ object HttpURLConnectionUpload {
     * @param urlSuffix
     *   the suffix to append to the url
     */
+  @deprecated(
+    "Use create(Timeouts(connect = ..., read = ...)) instead, these positional timeouts are easily swapped",
+    "1.1.0"
+  )
   def create(
     readTimeoutMs: Option[Int],
     connectionTimeoutMs: Option[Int],
