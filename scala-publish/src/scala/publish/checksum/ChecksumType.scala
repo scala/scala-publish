@@ -29,8 +29,13 @@ object ChecksumType {
   val all: Seq[ChecksumType]         = Seq(SHA1, MD5)
   val map: Map[String, ChecksumType] = all.map(c => c.name -> c).toMap
 
-  def parse(s: String): Either[String, ChecksumType] =
-    map
-      .get(s.toLowerCase(Locale.ROOT))
+  /** Parses a checksum type from its name (e.g. `sha-1`) or its extension (e.g. `sha1`), ignoring
+    * case
+    */
+  def parse(s: String): Either[String, ChecksumType] = {
+    val lowerCase = s.toLowerCase(Locale.ROOT)
+    all
+      .find(t => t.name == lowerCase || t.extension == lowerCase)
       .toRight(s"Unrecognized checksum: $s")
+  }
 }
