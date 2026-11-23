@@ -226,7 +226,10 @@ object MavenMetadata {
             (buildNumOpt, timestampOpt) match {
               case (Some(n), Some(ts)) => Some((n, ts))
               case (None, None)        => None
-              case _                   => ??? // Report via return type
+              case _                   =>
+                throw new InvalidMetadataException(
+                  s"Incomplete <snapshot> in maven-metadata.xml, expected both <timestamp> and <buildNumber>: $n"
+                )
             }
         }.flatten
     }.flatten

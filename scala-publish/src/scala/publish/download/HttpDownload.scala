@@ -2,14 +2,14 @@ package scala.publish.download
 
 import coursier.core.Authentication
 import sttp.client3.*
-import sttp.model.{Header, Uri}
+import sttp.model.Header
 
 import java.nio.charset.StandardCharsets
 import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZonedDateTime}
 
 import scala.publish.download.logger.DownloadLogger
-import scala.publish.util.BasicRealm
+import scala.publish.util.{BasicRealm, Urls}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -22,10 +22,7 @@ final case class HttpDownload(
     logger: DownloadLogger
   ): Option[(Option[Instant], Array[Byte])] = {
 
-    val uri = Uri.parse(url) match {
-      case Left(_)     => ???
-      case Right(uri0) => uri0
-    }
+    val uri = Urls.parse(url).fold(e => throw e, identity)
 
     val authHeaders = authentication
       .toSeq

@@ -3,11 +3,12 @@ package scala.publish.sonatype
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 import coursier.core.Authentication
 import sttp.client3.*
-import sttp.model.{Header, Uri}
+import sttp.model.Header
 
 import java.io.FileNotFoundException
 import java.nio.charset.StandardCharsets
 
+import scala.publish.util.Urls
 import scala.util.Try
 
 private[sonatype] final case class HttpClientUtil(
@@ -17,10 +18,7 @@ private[sonatype] final case class HttpClientUtil(
 ) {
 
   private def request(url: String, post: Option[Array[Byte]], isJson: Boolean) = {
-    val uri = Uri.parse(url) match {
-      case Left(_)     => ???
-      case Right(uri0) => uri0
-    }
+    val uri         = Urls.parse(url).fold(e => throw e, identity)
     val authHeaders = authentication
       .toSeq
       .flatMap(_.allHttpHeaders)

@@ -338,4 +338,21 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
       update(moduleFiles("1.1.0"), download.HttpDownload(backend))
     }
   }
+
+  for (
+    snapshot <- Seq(
+      "<buildNumber>3</buildNumber>",
+      "<timestamp>20240102.030405</timestamp>"
+    )
+  )
+    test(s"currentSnapshotVersioning reports incomplete snapshot info ($snapshot)") {
+      val elem = XML.loadString(
+        s"<metadata><versioning><snapshot>$snapshot</snapshot></versioning></metadata>"
+      )
+      val e = intercept[InvalidMetadataException](MavenMetadata.currentSnapshotVersioning(elem))
+      assert(
+        e.getMessage.startsWith("Incomplete <snapshot> in maven-metadata.xml"),
+        clue = e.getMessage
+      )
+    }
 }

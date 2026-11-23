@@ -105,4 +105,15 @@ class HttpDownloadTests extends ScalaPublishTestSuite {
       case other                                           => fail(s"Unexpected: $other")
     }
   }
+
+  test("an invalid URL is an IllegalArgumentException") {
+    val e = intercept[IllegalArgumentException] {
+      HttpDownload(new Server(response(200)).backend)
+        .downloadIfExists("https://repo.example.test/%zz", None, new DownloadLogger {})
+    }
+    assert(
+      e.getMessage.startsWith("Invalid URL: https://repo.example.test/%zz"),
+      clue = e.getMessage
+    )
+  }
 }
