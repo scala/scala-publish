@@ -1,10 +1,8 @@
 package scala.publish.signing
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, Paths}
 
-import scala.jdk.CollectionConverters.*
 import scala.publish.Content
 
 final case class GpgSigner(
@@ -12,6 +10,9 @@ final case class GpgSigner(
   command: String = "gpg",
   extraOptions: Seq[String] = Nil
 ) extends Signer {
+
+  private def tmpDir: Path =
+    Paths.get(System.getProperty("java.io.tmpdir"))
 
   private def keyArgs: Seq[String] =
     key match {
@@ -24,16 +25,7 @@ final case class GpgSigner(
   def sign(content: Content): Either[String, String] = {
 
     val (path, temporary) = content.pathOpt.map(p => (p, false)).getOrElse {
-      val p = Files.createTempFile(
-        "signer",
-        ".content",
-        PosixFilePermissions.asFileAttribute(
-          Set(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE
-          ).asJava
-        )
-      )
+      val p = TempFiles.createPrivate(tmpDir, "signer", ".content")
       val b = content.content()
       Files.write(p, b)
       (p, true)
@@ -47,16 +39,7 @@ final case class GpgSigner(
     temporary: Boolean
   ): Either[String, String] = {
     // inspired by https://github.com/jodersky/sbt-gpg/blob/853e608120eac830068bbb121b486b7cf06fc4b9/src/main/scala/Gpg.scala
-    val dest = Files.createTempFile(
-      "signer",
-      ".asc",
-      PosixFilePermissions.asFileAttribute(
-        Set(
-          PosixFilePermission.OWNER_READ,
-          PosixFilePermission.OWNER_WRITE
-        ).asJava
-      )
-    )
+    val dest = TempFiles.createPrivate(tmpDir, "signer", ".asc")
 
     try {
       val pb = new ProcessBuilder()
