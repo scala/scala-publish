@@ -13,29 +13,35 @@ object Dir {
 
   def fileSet(dir: Path, logger: DirLogger): FileSet = {
 
-    def files(f: Path): LazyList[Path] =
+    // ancestors: real paths of the directories being listed, to stop on symbolic link cycles
+    def files(f: Path, ancestors: Set[Path]): LazyList[Path] =
       if Files.isRegularFile(f) then {
         logger.element(dir, f)
         LazyList(f)
       }
       else if Files.isDirectory(f) then {
-        var s: java.util.stream.Stream[Path] = null
-        try {
-          s = Files.list(f)
-          s.iterator()
-            .asScala
-            .toVector
-            .to(LazyList)
-            .flatMap(files)
+        val realPath = f.toRealPath()
+        if ancestors.contains(realPath) then LazyList.empty
+        else {
+          val ancestors0                       = ancestors + realPath
+          var s: java.util.stream.Stream[Path] = null
+          try {
+            s = Files.list(f)
+            s.iterator()
+              .asScala
+              .toVector
+              .to(LazyList)
+              .flatMap(files(_, ancestors0))
+          }
+          finally if s != null then s.close()
         }
-        finally if s != null then s.close()
       }
       else
         // ???
         LazyList.empty
 
     val dir0  = dir.normalize().toAbsolutePath
-    val elems = files(dir0).toVector.map { f =>
+    val elems = files(dir0, Set.empty).toVector.map { f =>
       val p       = FsPath(dir0.relativize(f).iterator().asScala.map(_.toString).toVector)
       val content = Content.File(f)
       (p, content)
@@ -57,9 +63,11 @@ object Dir {
     //   - contains files,
     //   - and all that do have files that look like metadata (*.pom or *.xml)
     // None else (no files found, only directories).
-    def validate(f: Path): Option[Boolean] = {
+    // ancestors: real paths of the directories being validated, to stop on symbolic link cycles
+    def validate(f: Path, ancestors: Set[Path]): Option[Boolean] = {
 
-      val (dirs, files) = {
+      val ancestors0     = ancestors + f.toRealPath()
+      val (dirs0, files) = {
         var s: java.util.stream.Stream[Path] = null
         try {
           s = Files.list(f)
@@ -68,6 +76,8 @@ object Dir {
         finally
           if s != null then s.close()
       }
+
+      val dirs = dirs0.filter(d => !ancestors0.contains(d.toRealPath()))
 
       val checkFiles =
         if files.isEmpty then None
@@ -84,7 +94,7 @@ object Dir {
                 acc match {
                   case Some(false) => acc
                   case _           =>
-                    validate(dir) match {
+                    validate(dir, ancestors0) match {
                       case r @ Some(_) => r
                       case None        => acc
                     }
@@ -99,7 +109,7 @@ object Dir {
     }
 
     Files.isDirectory(dir) &&
-    validate(dir).getOrElse(false)
+    validate(dir, Set.empty).getOrElse(false)
   }
 
   def read(dir: Path, logger: => DirLogger): FileSet = {
