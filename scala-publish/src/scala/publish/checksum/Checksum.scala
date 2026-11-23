@@ -6,7 +6,7 @@ import java.security.MessageDigest
 /** A… checksum
   */
 final case class Checksum(`type`: ChecksumType, value: BigInteger) {
-  assert(`type`.validValue(value))
+  require(`type`.validValue(value), s"Invalid ${`type`.name} checksum value: $value")
   def repr: String =
     String.format(s"%0${`type`.size}x", value)
 }
