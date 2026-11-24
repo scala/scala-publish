@@ -1,3 +1,4 @@
+//| mill-jvm-version: system|25
 //| mvnDeps:
 //| - com.goyeau::mill-scalafix::0.6.2
 package build
@@ -9,11 +10,12 @@ import mill.util.VcsVersion
 import com.goyeau.mill.scalafix.ScalafixModule
 
 object Versions {
-  def scala3        = "3.9.0"
-  def coursier      = "2.1.27"
-  def jsoniterScala = "2.43.0"
-  def sttp          = "3.11.0"
-  def munit         = "1.3.6"
+  def scala3            = "3.9.0"
+  def javaOutputVersion = "17" // JVM the library must run on (built with a more recent JDK)
+  def coursier          = "2.1.27"
+  def jsoniterScala     = "2.43.0"
+  def sttp              = "3.11.0"
+  def munit             = "1.3.6"
 }
 
 object `scala-publish` extends Publish
@@ -36,7 +38,13 @@ object Deps {
 trait Publish extends ScalaModule with Published with ScalafixModule {
   def scalaVersion: T[String]                = Versions.scala3
   override def scalacOptions: T[Seq[String]] = Task {
-    super.scalacOptions() ++ Seq("-Wunused:all", "-deprecation", "-Werror")
+    super.scalacOptions() ++ Seq(
+      "-Wunused:all",
+      "-deprecation",
+      "-Werror",
+      "-java-output-version",
+      Versions.javaOutputVersion
+    )
   }
 
   def mvnDeps: T[Seq[Dep]] = super.mvnDeps() ++ Seq(
@@ -50,7 +58,7 @@ trait Publish extends ScalaModule with Published with ScalafixModule {
   )
   def javacOptions: T[Seq[String]] = super.javacOptions() ++ Seq(
     "--release",
-    "8"
+    Versions.javaOutputVersion
   )
 
   /** Generates `scala.publish.util.BuildInfo`, giving the library version at runtime (used in the
