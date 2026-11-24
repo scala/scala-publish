@@ -266,4 +266,15 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
     }
     finally java.nio.file.Files.deleteIfExists(f)
   }
+
+  test("uploads send the scala-publish User-Agent") {
+    val agents = mutable.ArrayBuffer.empty[Option[String]]
+    withServer { exchange =>
+      agents += Option(exchange.getRequestHeaders.getFirst("User-Agent"))
+      reply(exchange, 201)
+    } { (base, _) =>
+      upload.upload(s"$base/lib.jar", None, Array[Byte](1), nop)
+    }
+    assertEquals(agents.toList, List(Some(scala.publish.util.UserAgent.current())))
+  }
 }
