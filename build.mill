@@ -19,9 +19,13 @@ object Versions {
 object `scala-publish` extends Publish
 
 object Deps {
+  // coursier-cache depends on Scala CLI's config module, but none of its classes used here (nor the
+  // ones of coursier-core / coursier-util / coursier-paths) reference it. Excluding it keeps a
+  // published copy of Scala CLI's own module off the class path of users, Scala CLI included.
   def coursierCache = mvn"io.get-coursier::coursier-cache:${Versions.coursier}"
-  def coursierCore  = mvn"io.get-coursier::coursier-core:${Versions.coursier}"
-  def jsoniterCore  =
+    .exclude("org.virtuslab.scala-cli" -> "config_3")
+  def coursierCore = mvn"io.get-coursier::coursier-core:${Versions.coursier}"
+  def jsoniterCore =
     mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:${Versions.jsoniterScala}"
   def jsoniterMacros =
     mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-macros:${Versions.jsoniterScala}"
