@@ -23,10 +23,12 @@ sealed abstract class ChecksumType(
 }
 
 object ChecksumType {
-  case object SHA1 extends ChecksumType("sha-1", "sha1", 40)
-  case object MD5  extends ChecksumType("md5", "md5", 32)
+  case object SHA1   extends ChecksumType("sha-1", "sha1", 40)
+  case object MD5    extends ChecksumType("md5", "md5", 32)
+  case object SHA256 extends ChecksumType("sha-256", "sha256", 64)
+  case object SHA512 extends ChecksumType("sha-512", "sha512", 128)
 
-  val all: Seq[ChecksumType]         = Seq(SHA1, MD5)
+  val all: Seq[ChecksumType]         = Seq(SHA1, MD5, SHA256, SHA512)
   val map: Map[String, ChecksumType] = all.map(c => c.name -> c).toMap
 
   /** Parses a checksum type from its name (e.g. `sha-1`) or its extension (e.g. `sha1`), ignoring
