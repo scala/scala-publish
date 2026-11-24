@@ -9,7 +9,7 @@ import java.time.format.DateTimeFormatter
 import java.time.{Instant, ZonedDateTime}
 
 import scala.publish.download.logger.DownloadLogger
-import scala.publish.util.{BasicRealm, Urls}
+import scala.publish.util.{BasicRealm, Urls, UserAgent}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -33,6 +33,7 @@ final case class HttpDownload(
 
     val req = basicRequest
       .headers(authHeaders*)
+      .header("User-Agent", UserAgent.current())
       .response(asByteArrayAlways)
       .get(uri)
     logger.downloadingIfExists(url)

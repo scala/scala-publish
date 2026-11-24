@@ -328,6 +328,16 @@ class SonatypeStagingFlowTests extends ScalaPublishTestSuite {
       Seq(Method.POST -> s"/service/local/staging/profiles/${profileExample.id}/start")
     )
   }
+
+  test("Sonatype API requests send the scala-publish User-Agent") {
+    val server = new FakeStagingServer
+    val hooks  = hooksFor(server)
+    val data   = run(hooks.beforeUpload(fileSet("org.example"), isSnapshot = false))
+    run(hooks.afterUpload(data))
+    assert(server.calls.nonEmpty)
+    for (c <- server.calls)
+      assertEquals(c.userAgent, Some(scala.publish.util.UserAgent.current()), clue = c.path)
+  }
 }
 
 object SonatypeStagingFlowTests {
@@ -363,7 +373,8 @@ object SonatypeStagingFlowTests {
     path: String,
     body: String,
     authorization: Option[String],
-    contentType: Option[String]
+    contentType: Option[String],
+    userAgent: Option[String] = None
   )
 
   /** In-memory imitation of the Nexus 2 staging REST API, as emulated by the Central Portal OSSRH
@@ -399,7 +410,8 @@ object SonatypeStagingFlowTests {
         r.uri.path.mkString("/", "/", ""),
         body,
         r.headers.find(_.name.equalsIgnoreCase("Authorization")).map(_.value),
-        r.headers.find(_.name.equalsIgnoreCase("Content-Type")).map(_.value)
+        r.headers.find(_.name.equalsIgnoreCase("Content-Type")).map(_.value),
+        r.headers.find(_.name.equalsIgnoreCase("User-Agent")).map(_.value)
       )
       calls0.synchronized(calls0 += c)
       c

@@ -8,7 +8,7 @@ import sttp.model.Header
 import java.io.FileNotFoundException
 import java.nio.charset.StandardCharsets
 
-import scala.publish.util.Urls
+import scala.publish.util.{Urls, UserAgent}
 import scala.util.Try
 
 private[sonatype] final case class HttpClientUtil(
@@ -28,8 +28,9 @@ private[sonatype] final case class HttpClientUtil(
 
     val contentTypeHeaders =
       if isJson then Seq(new Header("Content-Type", "application/json")) else Nil
+    val userAgentHeader = new Header("User-Agent", UserAgent.current())
 
-    val allHeaders = authHeaders ++ contentTypeHeaders
+    val allHeaders = authHeaders ++ contentTypeHeaders :+ userAgentHeader
     val req        = basicRequest
       .header(
         "Accept",

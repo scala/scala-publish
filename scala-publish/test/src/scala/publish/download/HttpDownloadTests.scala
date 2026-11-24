@@ -116,4 +116,15 @@ class HttpDownloadTests extends ScalaPublishTestSuite {
       clue = e.getMessage
     )
   }
+
+  test("downloads send the scala-publish User-Agent") {
+    val server = new Server(response(404))
+    download(server)
+    assertEquals(
+      server.requests.toList.map(
+        _.headers.find(_.name.equalsIgnoreCase("User-Agent")).map(_.value)
+      ),
+      List(Some(scala.publish.util.UserAgent.current()))
+    )
+  }
 }

@@ -99,4 +99,14 @@ class HttpUploadTests extends ScalaPublishTestSuite {
       List(s"uploading($url, true, Some(1))", s"uploaded($url, true, Some(UploadError))")
     )
   }
+
+  test("uploads send the scala-publish User-Agent") {
+    val agents  = mutable.ArrayBuffer.empty[Option[String]]
+    val backend = SttpBackendStub.synchronous.whenAnyRequest.thenRespondF { r =>
+      agents += r.headers.find(_.name.equalsIgnoreCase("User-Agent")).map(_.value)
+      Response("", StatusCode.Created)
+    }
+    HttpUpload(backend, false).upload(url, None, Array[Byte](1), new UploadLogger {})
+    assertEquals(agents.toList, List(Some(scala.publish.util.UserAgent.current())))
+  }
 }

@@ -7,7 +7,7 @@ import sttp.model.{Header, Uri}
 import java.io.InputStream
 
 import scala.publish.upload.logger.UploadLogger
-import scala.publish.util.{BasicRealm, Urls}
+import scala.publish.util.{BasicRealm, Urls, UserAgent}
 import scala.util.control.NonFatal
 
 final case class HttpUpload(
@@ -80,6 +80,7 @@ final case class HttpUpload(
       val req = basicRequest
         .body(bodyInputStream)
         .headers(expect100Headers ++ authHeaders*)
+        .header("User-Agent", UserAgent.current())
         .put(uri)
       val resp =
         try req.send(backend)

@@ -10,7 +10,7 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.jdk.CollectionConverters.*
 import scala.publish.Content
 import scala.publish.upload.logger.UploadLogger
-import scala.publish.util.BasicRealm
+import scala.publish.util.{BasicRealm, UserAgent}
 import scala.util.control.NonFatal
 import scala.util.{Try, Using}
 
@@ -74,6 +74,7 @@ final case class HttpURLConnectionUpload(
       conn.setFixedLengthStreamingMode(size)
 
       conn.setRequestProperty("Content-Type", "application/octet-stream")
+      conn.setRequestProperty("User-Agent", UserAgent.current())
 
       var is: InputStream  = null
       var es: InputStream  = null
