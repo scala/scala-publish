@@ -6,6 +6,7 @@ import coursier.util.Task
 import java.time.Instant
 import java.util.concurrent.ExecutorService
 
+import scala.publish.checksum.ChecksumType
 import scala.publish.download.Download
 import scala.publish.download.logger.DownloadLogger
 import scala.publish.fileset.{FileSet, Group}
@@ -47,7 +48,8 @@ object PublishTasks {
           case m: Group.Module if m.version.endsWith("SNAPSHOT") && !m.version.contains("+") =>
             if withMavenSnapshotVersioning then {
               val m0 = Group.downloadSnapshotVersioningMetadata(m, download, repository, logger)
-              m0.addSnapshotVersioning(now, Set("md5", "sha1", "asc")) // meh second arg
+              // checksums and signatures aren't listed as artifacts
+              m0.addSnapshotVersioning(now, ChecksumType.all.map(_.extension).toSet + "asc")
             }
             else m.clearSnapshotVersioning
           case other => other

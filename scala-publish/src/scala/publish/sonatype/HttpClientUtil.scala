@@ -53,14 +53,6 @@ private[sonatype] final case class HttpClientUtil(
     result
   }
 
-  def create(url: String, post: Option[Array[Byte]] = None, isJson: Boolean = false): Unit = {
-    val resp = createResponse(url, post, isJson)
-    if resp.code.code != 201 then
-      throw new Exception(
-        s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"
-      )
-  }
-
   def createResponse(
     url: String,
     post: Option[Array[Byte]] = None,
@@ -103,7 +95,6 @@ private[sonatype] final case class HttpClientUtil(
   def get[T: JsonValueCodec](
     url: String,
     post: Option[Array[Byte]] = None,
-    nested: Boolean = true,
     isJson: Boolean = false
   ): T = {
     if verbosity >= 1 && post.isEmpty then Console.err.println(s"Getting $url")
@@ -120,18 +111,11 @@ private[sonatype] final case class HttpClientUtil(
     if verbosity >= 1 then Console.err.println(s"Done: $url")
 
     if resp.code.isSuccess then
-      if nested then
-        try readFromArray[T](resp.body)
-        catch {
-          case e: JsonReaderException =>
-            throw new Exception(s"Received invalid response from $url", e)
-        }
-      else
-        try readFromArray[T](resp.body)
-        catch {
-          case e: JsonReaderException =>
-            throw new Exception(s"Received invalid response from $url", e)
-        }
+      try readFromArray[T](resp.body)
+      catch {
+        case e: JsonReaderException =>
+          throw new Exception(s"Received invalid response from $url", e)
+      }
     else {
       val msg =
         s"Failed to get $url (http status: ${resp.code.code}, response: ${Try(new String(resp.body, StandardCharsets.UTF_8)).getOrElse("")})"

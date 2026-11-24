@@ -275,7 +275,7 @@ class ApiTests extends ScalaPublishTestSuite {
 
   // `publish --checksum list`
   test("checksum listing and parsing") {
-    assertEquals(ChecksumType.all.map(_.name), Seq("sha-1", "md5"))
+    assertEquals(ChecksumType.all.map(_.name), Seq("sha-1", "md5", "sha-256", "sha-512"))
     assertEquals(ChecksumType.parse("md5").map(_.extension), Right("md5"))
     assert(Content.File(Paths.get("x")).pathOpt.nonEmpty)
     assert(Content.InMemory(now, Array()).pathOpt.isEmpty)

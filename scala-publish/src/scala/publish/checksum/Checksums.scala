@@ -9,6 +9,7 @@ import java.util.concurrent.ExecutorService
 import scala.publish.Content
 import scala.publish.checksum.logger.ChecksumLogger
 import scala.publish.fileset.FileSet
+import scala.util.Using
 import scala.util.control.NonFatal
 
 object Checksums {
@@ -84,8 +85,8 @@ object Checksums {
               logger0.computing(id, type0, checksumPath.repr)
               val res =
                 try {
-                  val b        = content.content()
-                  val checksum = Checksum.compute(type0, b)
+                  val checksum =
+                    Using.resource(content.inputStream())(Checksum.compute(type0, _))
                   (
                     checksumPath,
                     Content.InMemory(now, checksum.repr.getBytes(StandardCharsets.UTF_8))

@@ -100,4 +100,19 @@ class FileUploadTests extends ScalaPublishTestSuite {
       assert(errors.forall(_._3.isInstanceOf[Upload.Error.FileException]), clue = errors)
       assert(Files.exists(base.resolve("org/example/ok.jar")))
     }
+
+  tmpDirs.test("file contents are copied to the repository") { base =>
+    val source = base.resolve("source.jar")
+    Files.write(source, Array[Byte](7, 8, 9))
+    val target = base.resolve("repo/org/example/lib.jar")
+    val res    = FileUpload(base).upload(
+      target.toUri.toString,
+      None,
+      scala.publish.Content.File(source),
+      new RecordingLogger,
+      None
+    )
+    assertEquals(res, None)
+    assertEquals(Files.readAllBytes(target).toSeq, Seq[Byte](7, 8, 9))
+  }
 }

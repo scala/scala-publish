@@ -1,6 +1,8 @@
 package scala.publish
 
-import coursier.core.{Configuration, MinimizedExclusions, ModuleName, Organization, Type}
+import coursier.core.{
+  Classifier, Configuration, MinimizedExclusions, ModuleName, Organization, Type
+}
 
 import scala.xml.{Elem, XML}
 
@@ -281,6 +283,151 @@ class PomTests extends ScalaPublishTestSuite {
         |<a>
         |  <b>c</b>
         |</a>""".stripMargin
+    )
+  }
+
+  private val baseProject = Pom.Project(
+    organization = Organization("org.example"),
+    moduleName = ModuleName("lib_3"),
+    version = "1.0.0"
+  )
+
+  private def children(
+    elem: scala.xml.NodeSeq,
+    label: String
+  ): Seq[String] = (elem \ label).map(_.text)
+
+  test("create(Project) renders several licenses") {
+    val pom = Pom.create(baseProject.copy(licenses =
+      Seq(
+        Pom.License("Apache-2.0", "https://spdx.org/licenses/Apache-2.0.html"),
+        Pom.License("MIT", "https://spdx.org/licenses/MIT.html")
+      )
+    ))
+    val licenses = XML.loadString(pom) \ "licenses" \ "license"
+    assertEquals(licenses.map(l => (l \ "name").text), Seq("Apache-2.0", "MIT"), clue = pom)
+    assertEquals(
+      parse(pom).info.licenseInfo.map(_.name),
+      Seq("Apache-2.0", "MIT")
+    )
+  }
+
+  test("create(Project) takes the organization URL separately from the project URL") {
+    val withOrgUrl = XML.loadString(Pom.create(baseProject.copy(
+      url = Some("https://github.com/example/lib"),
+      organizationUrl = Some("https://example.org")
+    )))
+    assertEquals(children(withOrgUrl \ "organization", "url"), Seq("https://example.org"))
+    assertEquals(
+      withOrgUrl.child.collect { case e: Elem if e.label == "url" => e.text },
+      Seq("https://github.com/example/lib")
+    )
+
+    val withoutOrgUrl =
+      XML.loadString(Pom.create(baseProject.copy(url = Some("https://github.com/example/lib"))))
+    assertEquals(children(withoutOrgUrl \ "organization", "url"), Nil)
+  }
+
+  test("create(Project) renders optional, type and classifier of dependencies") {
+    val pom = Pom.create(baseProject.copy(dependencies =
+      Seq(
+        Pom.Dependency(
+          Organization("org.dep"),
+          ModuleName("dep_3"),
+          "2.0.0",
+          scope = Some(Configuration.provided),
+          optional = true,
+          `type` = Some(Type("test-jar")),
+          classifier = Some(Classifier("tests"))
+        ),
+        Pom.Dependency(Organization("org.dep"), ModuleName("other_3"), "3.0.0")
+      )
+    ))
+    val deps = XML.loadString(pom) \ "dependencies" \ "dependency"
+    assertEquals(
+      deps.map(_.child.collect { case e: Elem => e.label }),
+      Seq(
+        Seq("groupId", "artifactId", "version", "type", "classifier", "scope", "optional"),
+        Seq("groupId", "artifactId", "version")
+      ),
+      clue = pom
+    )
+    val parsed = parse(pom).dependencies0.map(_._2)
+    assertEquals(
+      parsed.map(d =>
+        (
+          d.module.name.value,
+          d.optional0.contains(true),
+          d.publication.`type`.value,
+          d.publication.classifier.value
+        )
+      ),
+      Seq(("dep_3", true, "test-jar", "tests"), ("other_3", false, "", ""))
+    )
+  }
+
+  test("the former create overload renders the same POM as create(Project)") {
+    val legacy = Pom.create(
+      organization = Organization("org.example"),
+      moduleName = ModuleName("lib_3"),
+      version = "1.0.0",
+      url = Some("https://github.com/example/lib"),
+      dependencies = Seq((
+        Organization("org.dep"),
+        ModuleName("dep_3"),
+        "2.0.0",
+        Some(Configuration.test),
+        MinimizedExclusions(Set((Organization("org.x"), ModuleName("y"))))
+      )),
+      license = Some(Pom.License.apache2)
+    )
+    val project = Pom.create(baseProject.copy(
+      url = Some("https://github.com/example/lib"),
+      organizationUrl = Some("https://github.com/example/lib"),
+      dependencies = Seq(Pom.Dependency(
+        Organization("org.dep"),
+        ModuleName("dep_3"),
+        "2.0.0",
+        scope = Some(Configuration.test),
+        exclusions = MinimizedExclusions(Set((Organization("org.x"), ModuleName("y"))))
+      )),
+      licenses = Seq(Pom.License.apache2)
+    ))
+    assertNoDiff(legacy, project)
+  }
+
+  private val centralReadyProject = baseProject.copy(
+    name = Some("lib"),
+    description = Some("A library"),
+    url = Some("https://github.com/example/lib"),
+    licenses = Seq(Pom.License.apache2),
+    scm = Some(Pom.Scm.gitHub("example", "lib")),
+    developers = Seq(Pom.Developer("jdoe", "Jane Doe", "https://github.com/jdoe", None))
+  )
+
+  test("a project with all the fields required by Maven Central has no errors") {
+    assertEquals(Pom.centralRequirementErrors(centralReadyProject), Nil)
+  }
+
+  test("missing fields required by Maven Central are reported") {
+    assertEquals(
+      Pom.centralRequirementErrors(baseProject),
+      Seq(
+        "Missing project name",
+        "Missing project description",
+        "Missing project URL",
+        "Missing license",
+        "Missing developer",
+        "Missing SCM information"
+      )
+    )
+  }
+
+  test("blank fields don't meet Maven Central requirements") {
+    val project = centralReadyProject.copy(name = Some(" "), description = Some(""))
+    assertEquals(
+      Pom.centralRequirementErrors(project),
+      Seq("Missing project name", "Missing project description")
     )
   }
 }

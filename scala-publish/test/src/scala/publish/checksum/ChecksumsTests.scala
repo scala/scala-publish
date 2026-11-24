@@ -113,4 +113,22 @@ class ChecksumsTests extends ScalaPublishTestSuite {
     )
     assertEquals(events.drop(4).toList, List("computedSet(2)", "stop"))
   }
+
+  test("SHA-256 and SHA-512 checksum files") {
+    val res = Checksums(
+      Seq(ChecksumType.SHA256, ChecksumType.SHA512),
+      fileSet("a.jar" -> "abc"),
+      now,
+      ec,
+      new ChecksumLogger {}
+    ).unsafeRun()(using ec)
+    assertEquals(
+      contents(res),
+      Map(
+        "a.jar.sha256" -> "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "a.jar.sha512" ->
+          "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+      )
+    )
+  }
 }

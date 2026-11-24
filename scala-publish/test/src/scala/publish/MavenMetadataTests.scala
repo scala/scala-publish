@@ -355,4 +355,35 @@ class MavenMetadataTests extends ScalaPublishTestSuite {
         clue = e.getMessage
       )
     }
+
+  test("snapshot versioning doesn't list checksums nor signatures as artifacts") {
+    val dir   = Path(Seq("org", "example", "lib_3", "1.0.0-SNAPSHOT"))
+    val names = for {
+      base   <- Seq("lib_3-1.0.0-SNAPSHOT.pom", "lib_3-1.0.0-SNAPSHOT.jar")
+      suffix <- Seq("", ".md5", ".sha1", ".sha256", ".sha512", ".asc")
+    } yield base + suffix
+    val fs = FileSet(names.map { n =>
+      val c = if n.endsWith(".pom") then "<project/>".getBytes else Array[Byte](1)
+      (dir / n) -> Content.InMemory(now, c)
+    })
+    val res = PublishTasks.updateMavenMetadata(
+      fs,
+      now,
+      new MapDownload(Map.empty),
+      repo,
+      new DownloadLogger {},
+      withMavenSnapshotVersioning = true,
+      ec
+    ).unsafeRun()(using ec)
+    val md = res.elements
+      .collectFirst {
+        case (p, c) if p.repr.endsWith("1.0.0-SNAPSHOT/maven-metadata.xml") => c
+      }
+      .getOrElse(fail(s"No snapshot maven-metadata.xml in ${res.elements.map(_._1.repr)}"))
+    val extensions =
+      (XML.loadString(new String(md.content(), StandardCharsets.UTF_8)) \\ "snapshotVersion" \\
+        "extension")
+        .map(_.text)
+    assertEquals(extensions.sorted, Seq("jar", "pom"))
+  }
 }

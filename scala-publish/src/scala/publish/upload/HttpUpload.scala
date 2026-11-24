@@ -8,6 +8,7 @@ import java.io.InputStream
 
 import scala.publish.upload.logger.UploadLogger
 import scala.publish.util.{BasicRealm, Urls}
+import scala.util.control.NonFatal
 
 final case class HttpUpload(
   backend: SttpBackend[Identity, Any],
@@ -20,6 +21,8 @@ final case class HttpUpload(
     logger: UploadLogger,
     loggingIdOpt: Option[Object]
   ): Option[Upload.Error] = {
+    logger.uploading(url, loggingIdOpt, Some(content.length))
+
     val maybeUri: Either[Upload.Error, Uri] =
       Urls.parse(url).left.map(e => new Upload.Error.UploadError(url, e))
 
@@ -78,8 +81,14 @@ final case class HttpUpload(
         .body(bodyInputStream)
         .headers(expect100Headers ++ authHeaders*)
         .put(uri)
-      logger.uploading(url, loggingIdOpt, Some(content.length))
-      val resp = req.send(backend)
+      val resp =
+        try req.send(backend)
+        catch {
+          case NonFatal(ex) =>
+            // like HttpURLConnectionUpload: report, then throw
+            logger.uploaded(url, loggingIdOpt, Some(new Upload.Error.UploadError(url, ex)))
+            throw ex
+        }
       if resp.isSuccess then Right(())
       else if resp.code.code == 401 then
         Left {
@@ -100,6 +109,8 @@ final case class HttpUpload(
         }
     }
 
-    e.left.toOption
+    val errorOpt = e.left.toOption
+    logger.uploaded(url, loggingIdOpt, errorOpt)
+    errorOpt
   }
 }

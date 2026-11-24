@@ -2,10 +2,12 @@ package scala.publish.download
 
 import coursier.core.Authentication
 
-import java.nio.file.{Files, Path}
+import java.net.URI
+import java.nio.file.{Files, Path, Paths}
 import java.time.Instant
 
 import scala.publish.download.logger.DownloadLogger
+import scala.util.Try
 import scala.util.control.NonFatal
 
 /** Copies
@@ -19,7 +21,11 @@ final case class FileDownload(base: Path) extends Download {
     logger: DownloadLogger
   ): Option[(Option[Instant], Array[Byte])] = {
 
-    val p = base0.resolve(url).normalize()
+    // URLs like file:///…, as built from repository roots, or paths relative to base
+    val fileUriOpt = Try(new URI(url)).toOption.filter(_.getScheme == "file")
+    val p          = fileUriOpt
+      .fold(base0.resolve(url))(uri => base0.resolve(Paths.get(uri)))
+      .normalize()
     if p.startsWith(base0) then {
       logger.downloadingIfExists(url)
       val res =
