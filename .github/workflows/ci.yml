@@ -25,7 +25,7 @@ jobs:
     - uses: coursier/cache-action@v8
     - uses: coursier/setup-action@v3
       with:
-        jvm: temurin:17
+        jvm: corretto:25
     - name: Test
       if: runner.os != 'Windows'
       run: ./mill __.compile && ./mill __.test
@@ -61,7 +61,7 @@ jobs:
       - uses: coursier/cache-action@v8
       - uses: coursier/setup-action@v3
         with:
-          jvm: temurin:17
+          jvm: corretto:25
       - name: Run scalafix
         run: ./mill -i __.fix --check
 
@@ -80,7 +80,7 @@ jobs:
     - uses: coursier/cache-action@v8
     - uses: coursier/setup-action@v3
       with:
-        jvm: temurin:17
+        jvm: corretto:25
     - name: Release
       run: ./mill -i mill.scalalib.SonatypeCentralPublishModule/
       env:
