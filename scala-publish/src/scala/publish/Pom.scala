@@ -1,6 +1,13 @@
 package scala.publish
 
-import coursier.core.{Configuration, MinimizedExclusions, ModuleName, Organization, Type}
+import coursier.core.{
+  Classifier,
+  Configuration,
+  MinimizedExclusions,
+  ModuleName,
+  Organization,
+  Type
+}
 
 import scala.collection.mutable
 import scala.xml.{Elem, Node, NodeSeq}
@@ -43,7 +50,20 @@ object Pom {
     mail: Option[String]
   )
 
-  def create(
+  /** A dependency of a POM project */
+  final case class Dependency(
+    organization: Organization,
+    name: ModuleName,
+    version: String,
+    scope: Option[Configuration] = None,
+    exclusions: MinimizedExclusions = MinimizedExclusions.zero,
+    optional: Boolean = false,
+    `type`: Option[Type] = None,
+    classifier: Option[Classifier] = None
+  )
+
+  /** Data of a POM file */
+  final case class Project(
     organization: Organization,
     moduleName: ModuleName,
     version: String,
@@ -51,18 +71,15 @@ object Pom {
     description: Option[String] = None,
     url: Option[String] = None,
     name: Option[String] = None,
-    // TODO Accept full-fledged coursier.Dependency
-    dependencies: Seq[(
-      Organization,
-      ModuleName,
-      String,
-      Option[Configuration],
-      MinimizedExclusions
-    )] = Nil,
-    license: Option[License] = None,
+    dependencies: Seq[Dependency] = Nil,
+    licenses: Seq[License] = Nil,
     scm: Option[Scm] = None,
-    developers: Seq[Developer] = Nil
-  ): String = {
+    developers: Seq[Developer] = Nil,
+    organizationUrl: Option[String] = None
+  )
+
+  def create(project: Project): String = {
+    import project.*
 
     val nodes = new mutable.ListBuffer[NodeSeq]
 
@@ -86,21 +103,25 @@ object Pom {
       nodes += <name>{n}</name>
 
     nodes += {
-      val urlNodeOpt = url.fold[NodeSeq](Nil)(u => <url>{u}</url>)
+      val urlNodeOpt = organizationUrl.fold[NodeSeq](Nil)(u => <url>{u}</url>)
       <organization>
         <name>{organization.value}</name>
         {urlNodeOpt}
       </organization>
     }
 
-    for (l <- license)
+    if licenses.nonEmpty then
       nodes +=
         <licenses>
-          <license>
-            <name>{l.name}</name>
-            <url>{l.url}</url>
-            <distribution>repo</distribution>
-          </license>
+          {
+          licenses.map { l =>
+            <license>
+                <name>{l.name}</name>
+                <url>{l.url}</url>
+                <distribution>repo</distribution>
+              </license>
+          }
+        }
         </licenses>
 
     for (s <- scm)
@@ -130,28 +151,30 @@ object Pom {
       nodes +=
         <dependencies>
           {
-          dependencies.map {
-            case (depOrg, depName, ver, confOpt, exclusions) =>
-              <dependency>
-                  <groupId>{depOrg.value}</groupId>
-                  <artifactId>{depName.value}</artifactId>
-                  <version>{ver}</version>
-                  {confOpt.fold[NodeSeq](Nil)(c => <scope>{c.value}</scope>)}
-                  {
-                if exclusions.nonEmpty then
-                  <exclusions>{
-                    exclusions.toSeq().sortBy { case (org, module) =>
-                      (org.value, module.value)
-                    }.map { case (org, module) =>
-                      <exclusion>
-                      <groupId>{org.value}</groupId>
-                      <artifactId>{module.value}</artifactId>
-                    </exclusion>
-                    }
-                  }</exclusions>
-                else NodeSeq.Empty
-              }
-                </dependency>
+          dependencies.map { dep =>
+            <dependency>
+                <groupId>{dep.organization.value}</groupId>
+                <artifactId>{dep.name.value}</artifactId>
+                <version>{dep.version}</version>
+                {dep.`type`.fold[NodeSeq](Nil)(t => <type>{t.value}</type>)}
+                {dep.classifier.fold[NodeSeq](Nil)(c => <classifier>{c.value}</classifier>)}
+                {dep.scope.fold[NodeSeq](Nil)(c => <scope>{c.value}</scope>)}
+                {
+              if dep.exclusions.nonEmpty then
+                <exclusions>{
+                  dep.exclusions.toSeq().sortBy { case (org, module) =>
+                    (org.value, module.value)
+                  }.map { case (org, module) =>
+                    <exclusion>
+                    <groupId>{org.value}</groupId>
+                    <artifactId>{module.value}</artifactId>
+                  </exclusion>
+                  }
+                }</exclusions>
+              else NodeSeq.Empty
+            }
+                {if dep.optional then <optional>true</optional> else NodeSeq.Empty}
+              </dependency>
           }
         }
         </dependencies>
@@ -162,6 +185,66 @@ object Pom {
       </project>
     )
   }
+
+  /** Fields of `project` missing for it to be published to Maven Central
+    *
+    * See https://central.sonatype.org/publish/requirements/
+    */
+  def centralRequirementErrors(project: Project): Seq[String] = {
+    def blank(s: Option[String]) = s.forall(_.trim.isEmpty)
+    Seq(
+      Option.when(blank(project.name))("Missing project name"),
+      Option.when(blank(project.description))("Missing project description"),
+      Option.when(blank(project.url))("Missing project URL"),
+      Option.when(project.licenses.isEmpty)("Missing license"),
+      Option.when(project.developers.isEmpty)("Missing developer"),
+      Option.when(project.scm.isEmpty)("Missing SCM information")
+    ).flatten
+  }
+
+  /** Creates a POM, using `url` as both project and organization URL
+    *
+    * See `create(project: Project)` for more options (several licenses, dependency types,
+    * classifiers and optional flags, a distinct organization URL).
+    */
+  def create(
+    organization: Organization,
+    moduleName: ModuleName,
+    version: String,
+    packaging: Option[Type] = None,
+    description: Option[String] = None,
+    url: Option[String] = None,
+    name: Option[String] = None,
+    dependencies: Seq[(
+      Organization,
+      ModuleName,
+      String,
+      Option[Configuration],
+      MinimizedExclusions
+    )] = Nil,
+    license: Option[License] = None,
+    scm: Option[Scm] = None,
+    developers: Seq[Developer] = Nil
+  ): String =
+    create(
+      Project(
+        organization = organization,
+        moduleName = moduleName,
+        version = version,
+        packaging = packaging,
+        description = description,
+        url = url,
+        name = name,
+        dependencies = dependencies.map {
+          case (depOrg, depName, ver, confOpt, exclusions) =>
+            Dependency(depOrg, depName, ver, scope = confOpt, exclusions = exclusions)
+        },
+        licenses = license.toSeq,
+        scm = scm,
+        developers = developers,
+        organizationUrl = url
+      )
+    )
 
   private def addOrUpdate(content: Elem, label: String)(update: Option[Node] => Node): Elem = {
     // assumes there's at most one child with this label…
