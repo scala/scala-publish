@@ -2,6 +2,7 @@ package scala.publish.upload
 
 import coursier.core.Authentication
 
+import scala.publish.Content
 import scala.publish.upload.logger.UploadLogger
 import scala.publish.util.{EmaRetryParams, Retry}
 
@@ -27,9 +28,19 @@ final case class RetryingUpload(
     logger: UploadLogger,
     loggingIdOpt: Option[Object]
   ): Option[Upload.Error] =
-    Retry(retryParams, sleep)((res: Option[Upload.Error]) => res.exists(_.transient)) { _ =>
-      underlying.upload(url, authentication, content, logger, loggingIdOpt)
-    }
+    retrying(underlying.upload(url, authentication, content, logger, loggingIdOpt))
+
+  override def upload(
+    url: String,
+    authentication: Option[Authentication],
+    content: Content,
+    logger: UploadLogger,
+    loggingIdOpt: Option[Object]
+  ): Option[Upload.Error] =
+    retrying(underlying.upload(url, authentication, content, logger, loggingIdOpt))
+
+  private def retrying(upload: => Option[Upload.Error]): Option[Upload.Error] =
+    Retry(retryParams, sleep)((res: Option[Upload.Error]) => res.exists(_.transient))(_ => upload)
 }
 
 object RetryingUpload {

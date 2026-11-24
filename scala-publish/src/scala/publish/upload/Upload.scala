@@ -43,6 +43,19 @@ trait Upload {
   ): Option[Upload.Error] =
     upload(url, authentication, content, logger, None)
 
+  /** Uploads `content` at the passed `url`.
+    *
+    * Reads the whole content in memory by default. Implementations override this to stream it.
+    */
+  def upload(
+    url: String,
+    authentication: Option[Authentication],
+    content: Content,
+    logger: UploadLogger,
+    loggingIdOpt: Option[Object]
+  ): Option[Upload.Error] =
+    upload(url, authentication, content.content(), logger, loggingIdOpt)
+
   /** Uploads a whole [[FileSet]].
     *
     * @param repository
@@ -69,11 +82,9 @@ trait Upload {
         .map {
           case (path, content) =>
             val url   = s"$baseUrl0/${path.elements.mkString("/")}"
-            def run() = {
-              val b = content.content()
-              upload(url, repository.authentication, b, logger, Some(id))
+            def run() =
+              upload(url, repository.authentication, content, logger, Some(id))
                 .map((path, content, _))
-            }
             parallel match {
               case Some(pool) => Task.schedule(pool)(run())
               case None       => Task.delay(run())

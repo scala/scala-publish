@@ -8,10 +8,11 @@ import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.jdk.CollectionConverters.*
+import scala.publish.Content
 import scala.publish.upload.logger.UploadLogger
 import scala.publish.util.BasicRealm
-import scala.util.Try
 import scala.util.control.NonFatal
+import scala.util.{Try, Using}
 
 final case class HttpURLConnectionUpload(
   urlSuffix: String,
@@ -24,8 +25,35 @@ final case class HttpURLConnectionUpload(
     content: Array[Byte],
     logger: UploadLogger,
     loggingIdOpt: Option[Object]
+  ): Option[Upload.Error] =
+    upload0(url, authentication, content.length.toLong, _.write(content), logger, loggingIdOpt)
+
+  /** Streams `content`, rather than loading it in memory */
+  override def upload(
+    url: String,
+    authentication: Option[Authentication],
+    content: Content,
+    logger: UploadLogger,
+    loggingIdOpt: Option[Object]
+  ): Option[Upload.Error] =
+    upload0(
+      url,
+      authentication,
+      content.size(),
+      os => Using.resource(content.inputStream())(_.transferTo(os)),
+      logger,
+      loggingIdOpt
+    )
+
+  private def upload0(
+    url: String,
+    authentication: Option[Authentication],
+    size: Long,
+    writeContent: OutputStream => Unit,
+    logger: UploadLogger,
+    loggingIdOpt: Option[Object]
   ): Option[Upload.Error] = {
-    logger.uploading(url, loggingIdOpt, Some(content.length))
+    logger.uploading(url, loggingIdOpt, Some(size))
 
     val res = Try {
       val url0 = URI.create(url + urlSuffix).toURL
@@ -42,9 +70,10 @@ final case class HttpURLConnectionUpload(
         conn.setRequestProperty(k, v)
 
       conn.setDoOutput(true)
+      // sets Content-Length, and streams the body rather than buffering it in memory
+      conn.setFixedLengthStreamingMode(size)
 
       conn.setRequestProperty("Content-Type", "application/octet-stream")
-      conn.setRequestProperty("Content-Length", content.length.toString)
 
       var is: InputStream  = null
       var es: InputStream  = null
@@ -52,7 +81,7 @@ final case class HttpURLConnectionUpload(
 
       try {
         os = conn.getOutputStream
-        os.write(content)
+        writeContent(os)
         os.close()
 
         val code = conn.getResponseCode

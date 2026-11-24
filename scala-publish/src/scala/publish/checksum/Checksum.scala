@@ -1,5 +1,6 @@
 package scala.publish.checksum
 
+import java.io.InputStream
 import java.math.BigInteger
 import java.security.MessageDigest
 
@@ -21,6 +22,18 @@ object Checksum {
     val calculatedSum = new BigInteger(1, digest)
 
     Checksum(`type`, calculatedSum)
+  }
+
+  /** Computes the checksum of the content read from `content`, without closing it */
+  def compute(`type`: ChecksumType, content: InputStream): Checksum = {
+    val md  = MessageDigest.getInstance(`type`.name)
+    val buf = new Array[Byte](64 * 1024)
+    var n   = content.read(buf)
+    while n >= 0 do {
+      md.update(buf, 0, n)
+      n = content.read(buf)
+    }
+    Checksum(`type`, new BigInteger(1, md.digest()))
   }
 
 }

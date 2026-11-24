@@ -128,4 +128,44 @@ class UploadTests extends ScalaPublishTestSuite {
     assertEquals(errors, Seq.empty)
     assertEquals(underlying.calls.toList, Nil)
   }
+
+  /** Records the Content instances passed to the Content overload of upload */
+  private final class ContentRecordingUpload extends Upload {
+    val contents = mutable.ArrayBuffer.empty[Content]
+    def upload(
+      url: String,
+      authentication: Option[Authentication],
+      content: Array[Byte],
+      logger: UploadLogger,
+      loggingIdOpt: Option[Object]
+    ): Option[Upload.Error] = fail("the Array[Byte] overload shouldn't be called")
+    override def upload(
+      url: String,
+      authentication: Option[Authentication],
+      content: Content,
+      logger: UploadLogger,
+      loggingIdOpt: Option[Object]
+    ): Option[Upload.Error] = {
+      contents.synchronized(contents += content)
+      None
+    }
+  }
+
+  test("uploadFileSet passes contents as is, without reading them beforehand") {
+    val missing = Content.File(java.nio.file.Paths.get("does-not-exist", "a.jar"))
+    val fs      = FileSet(Seq(Path(Seq("org", "example", "a.jar")) -> missing))
+    val upload  = new ContentRecordingUpload
+    val errors  = upload.uploadFileSet(repo, fs, nop, None).unsafeRun()(using ec)
+    assertEquals(errors, Seq.empty)
+    assertEquals(upload.contents.toList, List(missing))
+  }
+
+  test("DummyUpload doesn't read contents") {
+    val missing = Content.File(java.nio.file.Paths.get("does-not-exist", "a.jar"))
+    val fs      = FileSet(Seq(Path(Seq("org", "example", "a.jar")) -> missing))
+    val errors  = DummyUpload(new RecordingUpload)
+      .uploadFileSet(repo, fs, nop, None)
+      .unsafeRun()(using ec)
+    assertEquals(errors, Seq.empty)
+  }
 }

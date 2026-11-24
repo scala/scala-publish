@@ -240,4 +240,30 @@ class HttpURLConnectionUploadTests extends ScalaPublishTestSuite {
       case other => fail(s"Expected a logged UploadError, got $other")
     }
   }
+
+  test("file contents are streamed with their size as Content-Length, not chunked") {
+    val f = java.nio.file.Files.createTempFile("scala-publish-upload", ".jar")
+    try {
+      val bytes = Array.tabulate[Byte](100000)(i => (i % 127).toByte)
+      java.nio.file.Files.write(f, bytes)
+      val headers = mutable.ArrayBuffer.empty[(Option[String], Option[String])]
+      withServer { exchange =>
+        headers += (
+          (
+            Option(exchange.getRequestHeaders.getFirst("Content-Length")),
+            Option(exchange.getRequestHeaders.getFirst("Transfer-Encoding"))
+          )
+        )
+        reply(exchange, 201)
+      } { (base, received) =>
+        val res =
+          upload.upload(s"$base/lib.jar", None, scala.publish.Content.File(f), nop, None)
+        assertEquals(res, None)
+        assertEquals(received().map(_.body.length), Seq(100000))
+        assertEquals(received().map(_.body), Seq(bytes.toSeq))
+        assertEquals(headers.toList, List((Some("100000"), None)))
+      }
+    }
+    finally java.nio.file.Files.deleteIfExists(f)
+  }
 }

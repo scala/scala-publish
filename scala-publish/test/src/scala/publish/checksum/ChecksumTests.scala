@@ -34,4 +34,16 @@ class ChecksumTests extends ScalaPublishTestSuite {
       Checksum(ChecksumType.MD5, BigInteger.ONE.shiftLeft(128))
     )
   }
+
+  test("checksums can be computed from a stream") {
+    def stream = new java.io.ByteArrayInputStream(abc)
+    assertEquals(
+      Checksum.compute(ChecksumType.MD5, stream).repr,
+      "900150983cd24fb0d6963f7d28e17f72"
+    )
+    assertEquals(
+      Checksum.compute(ChecksumType.SHA1, stream).repr,
+      "a9993e364706816aba3e25717850c26c9cd0d89d"
+    )
+  }
 }

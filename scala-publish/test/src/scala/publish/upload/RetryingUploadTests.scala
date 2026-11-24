@@ -99,4 +99,31 @@ class RetryingUploadTests extends ScalaPublishTestSuite {
     }
     finally pool.shutdown()
   }
+
+  test("retries go through the Content overload of the underlying upload") {
+    val contents   = mutable.ArrayBuffer.empty[Content]
+    val underlying = new Upload {
+      def upload(
+        url: String,
+        authentication: Option[Authentication],
+        content: Array[Byte],
+        logger: UploadLogger,
+        loggingIdOpt: Option[Object]
+      ): Option[Upload.Error] = fail("the Array[Byte] overload shouldn't be called")
+      override def upload(
+        url: String,
+        authentication: Option[Authentication],
+        content: Content,
+        logger: UploadLogger,
+        loggingIdOpt: Option[Object]
+      ): Option[Upload.Error] = {
+        contents += content
+        if contents.length < 2 then Some(httpError(503)) else None
+      }
+    }
+    val (upload, _) = retrying(underlying)
+    val content     = Content.InMemory(Instant.EPOCH, Array[Byte](1))
+    assertEquals(upload.upload(url, None, content, nop, None), None)
+    assertEquals(contents.toList, List(content, content))
+  }
 }
