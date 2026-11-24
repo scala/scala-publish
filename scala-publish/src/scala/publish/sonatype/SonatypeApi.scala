@@ -42,8 +42,8 @@ final case class SonatypeApi(
     nested: Boolean,
     isJson: Boolean
   ): T =
-    if nested then clientUtil.get(url, post, nested, isJson)(using Response.codec[T]).data
-    else clientUtil.get[T](url, post, nested, isJson)
+    if nested then clientUtil.get(url, post, isJson)(using Response.codec[T]).data
+    else clientUtil.get[T](url, post, isJson)
 
   private def get[T: JsonValueCodec](
     url: String,
@@ -141,7 +141,7 @@ final case class SonatypeApi(
 
   def rawCreateStagingRepository(profile: Profile, description: String): RawJson =
     get(
-      s"${profile.uri}/start",
+      s"$base/staging/profiles/${profile.id}/start",
       post = Some(postBody(writeToArray(StartRequest(description)))),
       isJson = true
     )(using RawJson.codec)

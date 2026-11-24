@@ -315,6 +315,19 @@ class SonatypeStagingFlowTests extends ScalaPublishTestSuite {
     assertEquals(e.getMessage, s"Repository ${server.stagedRepoId} not found")
     assert(!server.calls.exists(_.path.endsWith("/bulk/promote")))
   }
+
+  test("rawCreateStagingRepository uses the same endpoint as createStagingRepository") {
+    val server = new FakeStagingServer
+    val api    = SonatypeApi(server.backend, server.apiBase, None, verbosity = -1)
+    // profile URIs come from the server, and may not match the API base
+    val profile = profileExample.copy(uri = "https://elsewhere.example.test/profiles/p-example")
+    val raw     = api.rawCreateStagingRepository(profile, "create staging repository")
+    assert(raw.toString.contains(server.stagedRepoId), clue = raw)
+    assertEquals(
+      server.calls.map(c => (c.method, c.path)),
+      Seq(Method.POST -> s"/service/local/staging/profiles/${profileExample.id}/start")
+    )
+  }
 }
 
 object SonatypeStagingFlowTests {
